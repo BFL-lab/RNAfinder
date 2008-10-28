@@ -1,0 +1,921 @@
+#!/usr/bin/perl -w -- -*-Perl-*-
+
+#############################################################################
+#                                                                           #
+#                                 RNAfinder                                 #
+#                                                                           #
+# DESCRIPTION:                                                              #
+# Searches for RNAs in a genome. Wrapper around RNASpinner                  #
+#                                                                           #
+#############################################################################
+#
+#
+#############################################################################
+#                                 RNAfinder                                 #
+#                                                                           #
+#                            Copyright (C) 1994                             #
+#                        Departement de Biochimie,                          #
+#                         Universite de Montreal,                           #
+#                    C.P. 6128, succursale Centre-ville,                    #
+#                     Montreal, Quebec, Canada, H3C 2J7                     #
+#                                                                           #
+#                      Programming: Natacha Beck (OGMP)                     #
+#                  E-Mail information: natabeck@gmail.com                   #
+#                                                                           #
+#     This software is distributed under the GNU GENERAL PUBLIC LICENSE, as #
+# published by the Free Software Foundation. A copy of version 2 of this    #
+# license should be included in a file called COPYING. If not, write to the #
+# Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
+#############################################################################
+#
+#    $Id: RNAfinder,v 1.1 2008/10/28 21:57:23 nbeck Exp $
+#
+#    $Log: RNAfinder,v $
+#    Revision 1.1  2008/10/28 21:57:23  nbeck
+#    Initial check-in.
+#
+# 
+
+##########################
+# Initialization section #
+##########################
+
+require 5.00;
+use strict;
+use File::Basename;
+use PirObject qw( RNAfinderConfigFile RNAPredictionList LinStruct);
+use Bio::Tools::CodonTable;
+use vars qw( $VERSION $RCS_VERSION );
+
+# Default umask
+umask 027;
+
+# Program's name and version number.
+$RCS_VERSION = '$Id: RNAfinder,v 1.1 2008/10/28 21:57:23 nbeck Exp $';
+($VERSION)   = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
+my ($BASENAME) = ($0 =~ /([^\/]+)$/);
+
+print "This is $BASENAME version $VERSION.\n";
+
+# Get login name.
+my $USER = getpwuid($<) || getlogin || die "Can't find USER from environment!\n";
+
+##############################
+# Treat config file for help #
+##############################
+
+# Define Path for .cfg
+my @CFG_PATH      = (
+    ".",
+    # You can add other search directories here
+    ($ENV{"HOME"} || "."),
+);
+push(@CFG_PATH,split(/:/,$ENV{"CFG_PATH"}))
+    if $ENV{"CFG_PATH"};
+   
+    
+#Check for .epn 
+my $DIR_CFG    = "";
+foreach my $dir (@CFG_PATH) {
+    next if !( -e "$dir/.RNAfinder.cfg" );
+    $DIR_CFG    = $dir;
+    last;
+}
+die "The config file '.RNAfinder.cfg' doesn't find. Check your installation for this one\n"
+    if !$DIR_CFG;
+
+# Treatment of config file.
+my $CONFIGFILE      = "$DIR_CFG/.RNAfinder.cfg";
+
+my $conf_file       = PirObject::RNAfinderConfigFile->ImportFromTextFile($CONFIGFILE);
+my $geneprogs       = $conf_file->get_geneprogs();
+my $dynamic_help    = &CreateDynamicHelp($geneprogs);
+
+###########################
+# Check arguments numbers #
+###########################
+if (@ARGV == 0) {
+	print "\nThere were no arguments passed on the command line. This program takes arguments\n";
+	Usage();
+}
+
+##################################
+# Global variables and constants #
+##################################
+
+$|=1;
+
+# Input options
+my $RNA_NAME             = "";     # -n
+my $GENCODE_ID           = 1;      # -c
+my $GENOMEFILE           = "";     # -g
+my $MODEL                = "";     # -m
+my $ANTICODON_ELEMENT_ID = 13;     # -a
+
+# Default parameters for the script
+my $DEBUG          = 0;      # -d
+my $TMP_DIR        = "/tmp/RNAfinder.$$";
+
+# Output options
+my $OUTFILE        = ""; # -o
+
+for (;@ARGV;) {
+# Add in the regex [] ALL single-character command-line options
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([ncgmdEARXCao])(.*)$/);
+    last if ! defined $opt;
+    # Add in regex [] ONLY single-character options that
+    # REQUIRE an argument, except for the 'd' debug switch.
+    if ($opt =~ /[ncgmEARXCao]/ && $arg eq "") {
+        if (@ARGV < 2) {
+            print "Argument required for option \"$opt\".\n";
+            exit 1;
+        }
+        shift;
+        $arg=$ARGV[0];
+    }
+    
+    $ANTICODON_ELEMENT_ID = $arg              if $opt eq 'a';
+    $RNA_NAME             = $arg              if $opt eq 'n';
+    $GENCODE_ID           = $arg              if $opt eq 'c';
+    $GENOMEFILE           = $arg              if $opt eq 'g';
+    $MODEL                = $arg              if $opt eq 'm';
+    $DEBUG                = ($arg ? $arg : 1) if $opt eq 'd';
+    $OUTFILE              = $arg              if $opt eq 'o';
+    shift;
+}
+
+#################################
+# Validate command-line options #
+#################################
+
+&Usage if @ARGV > 0 || $RNA_NAME eq "" || $GENOMEFILE eq "" || $MODEL eq "";
+
+die "Genetic code ID supplied with -c must be a number.\n"
+    if $GENCODE_ID !~ /^\d+$/;
+    
+die "Element number supplied with -a must be a number.\n"
+    if $ANTICODON_ELEMENT_ID !~ /^\d+$/;
+    
+die "Sequence file $GENOMEFILE does not exist\n"
+	    if (!-e $GENOMEFILE );
+    
+# Make case insensitive.
+foreach my $RNA_name (sort { $a cmp $b } keys(%$geneprogs) ) {
+    my $lc_name = lc($RNA_name);
+    $geneprogs->{$lc_name} =  $geneprogs->{$RNA_name};
+    delete $geneprogs->{$RNA_name} if $lc_name ne $RNA_name;
+    my $commandset = $geneprogs->{$lc_name};
+    my $model_list = $commandset->get_modelList();
+    foreach my $model (sort { $a cmp $b } keys(%$model_list) ) {
+        my $lc_model = lc($model);
+        $model_list->{$lc_model} = $model_list->{$model};
+        delete $model_list->{$model} if $lc_model ne $model;
+    }
+}
+
+
+die "Block for RNA : '$RNA_NAME' not found in $CONFIGFILE, see help.\n" 
+    if !$geneprogs->{lc $RNA_NAME};
+
+# Define variable around geneprogs
+my $rna_block   = $geneprogs->{lc $RNA_NAME};
+my $istRNA      = ($RNA_NAME =~ m/tRNA/i ? 1 : 0 ); 
+my $modelList   = $rna_block->get_modelList();
+my $commandList = $rna_block->get_commandList();
+my $intel       = $rna_block->get_intel();
+
+#########
+# Usage #
+#########
+
+sub Usage {
+    print <<USAGE;
+
+This is $BASENAME $VERSION, by Natacha Beck.
+
+Usage: $BASENAME [-d] -n RNAname -g fastagenome -m model [-c gencodeid] [-a anticodon_id]
+
+This program will search for and identify RNAs in a genome. It is a wrapper
+around a search tool called 'RNASpinner', that needs to be installed on your system.
+'RNASpinner' is a wrapper around 'erpin' [1], thats needs to be installed on your system. 
+
+
+Input data options:
+-------------------
+
+-g fastagenome   A file containing the genome sequence to search, in FASTA
+                 format. Warning: because of restrictions in how some
+                 subprocesses (notable erpin itself) handle FASTA headers,
+                 make sure that the first word of each header is unique and
+                 not too long.
+
+-n RNAname       Name of RNAs sought. Each supported RNAs must have a definition
+                 block on ConfigFile ('.RNAfinder.cfg').
+                 
+-m modelfile     A erpin model file for RNA. This program is distributed
+                 with differents models like : "tRNA.epn", "rnpB.epn"...
+                 See also the documentation for option -a below for tRNA.
+
+-c gencodeid     The genetic code used by the organism in the fastagenome.
+                 This is Bio::Tools::CodonTable number, which corresponds to
+                 the NCBI convention: 1 for universal, etc. Only use for 
+                 define anticodon type for tRNA
+
+-a               This is the number that correspond to the erpin model's
+                 anticodon; the default value is "13", which is the anticodon
+                 element ID in the modelfile 'tRNA.epn' supplied in this
+                 program's distribution.
+                 Only used for tRNA identification in order to locate anticodon.
+
+Other options:
+--------------
+
+-d               Turn on debug mode; some temporary files will be left in
+                 a subdirectory created in /tmp, available for inspection.
+
+-o               This is name of output file. The default output file will
+                 use the append '.out' to the end of concatenation of RNAname
+                 and genome name.
+                 Should this file already exist, an integer will be appended
+                 to the end of the file, incremented by 1 from the largest
+                 number appended to existing file.
+                 
+Possibility of annotation:
+--------------------------
+
+$dynamic_help
+
+Credits:
+--------
+
+RNASpinner : 
+    Natacha Beck, Departement de Biochimie, Universite de Montreal.
+    natabeck\@gmail.com
+
+erpin:
+    [1] Gautheret D, Lambert A. (2001) Direct RNA Motif Definition and Identification
+        from Multiple Sequence Alignments using Secondary Structure Profiles.
+        J Mol Biol. 313:1003-11 
+
+    Erpin web site: http://tagc.univ-mrs.fr/erpin/
+
+PirObject library:
+    Pierre Rioux, http://sourceforge.net/projects/pirobject/
+
+This program ($BASENAME):
+    Natacha Beck, Departement de Biochimie, Universite de Montreal.
+    natabeck\@gmail.com
+
+USAGE
+
+    exit 1;
+}
+
+sub CreateDynamicHelp {
+    my $geneprogs = shift;
+    
+    my $RNA_list        = "";
+    foreach my $RNA_name (sort { $a cmp $b } keys(%$geneprogs) ) {
+        my $commandset = $geneprogs->{$RNA_name};
+        $RNA_list     .= $commandset->get_genename().",";
+    }
+    $RNA_list =~ s/,$/\./;
+    my $for_add_in_help = 
+"RNAfinder can make the annotation of following RNAs :
+    - $RNA_list\n\n
+For each RNA, here's the list of models available :\n";
+    foreach my $RNA_name (sort { $a cmp $b } keys(%$geneprogs) ) {
+        my $commandset = $geneprogs->{$RNA_name};
+        my $name       = $commandset->get_genename();
+        my $model_list = $commandset->get_modelList();
+        my $mlist       = "";
+        foreach my $model (sort { $a cmp $b } keys(%$model_list) ) {
+            $mlist .= "$model,";
+        }
+        $mlist =~ s/,$/\./;
+        $for_add_in_help .= "    - $name : $mlist\n";
+    }
+    return $for_add_in_help;
+}
+    
+################
+# Trap Signals #
+################
+
+sub SigCleanup { # private
+     die "\nExiting: received signal \"" . $_[0] . "\".\n";
+}
+$SIG{'INT'}  = \&SigCleanup;
+$SIG{'TERM'} = \&SigCleanup;
+$SIG{'HUP'}  = \&SigCleanup;
+$SIG{'QUIT'} = \&SigCleanup;
+$SIG{'PIPE'} = \&SigCleanup;
+$SIG{'ALRM'} = \&SigCleanup;
+
+###############################
+#   M A I N   P R O G R A M   #
+###############################
+
+# Work directory
+mkdir($TMP_DIR,0700) or die "Can't create temp work directory '$TMP_DIR': $!\n";
+
+my $CodonTable = Bio::Tools::CodonTable->new( -id => $GENCODE_ID )
+    or die "Cannot find codon table for genetic code id '$GENCODE_ID' ?!?\n";
+
+
+die "Model : '$MODEL' not found for RNA : '$RNA_NAME' in $CONFIGFILE\n" 
+    if !$modelList->{lc $MODEL};
+    
+my $List_of_commands = $modelList->{lc $MODEL}
+    or die "Model '$MODEL' does not exist in config file for gene '$RNA_NAME'\n";
+my @tab_of_command   = split(/,/,$List_of_commands);
+
+my $all_list = ();
+
+my @EPN_PATH      = (
+    # You can add other search directories here
+    ($ENV{"HOME"} || ".") . "/ErpinModels",
+);
+
+push(@EPN_PATH,split(/:/,$ENV{"EPN_PATH"}))
+    if $ENV{"EPN_PATH"};
+   
+foreach my $command_name (@tab_of_command) {
+    my $command =  $commandList->{$command_name};
+    my $outfile =  "$TMP_DIR/${RNA_NAME}_${MODEL}_$command_name";
+    my $comfile =  "$TMP_DIR/${RNA_NAME}_${MODEL}_${command_name}_com";
+    
+    #Check for .epn 
+    my $epn_name = $1 if $command =~ m/%MODELDIR%\/(.+.epn)/;
+    die "RNASpinner must have -m option with argument '\%MODELDIR\%/model_file.epn'\n"
+        if $command !~  m/%MODELDIR%\/(.+.epn)/;
+    my $epn_Isfind = 0;
+    my $DIR_MOD    = "";
+    foreach my $dir (@EPN_PATH) {
+        next if !( -e "$dir/$epn_name");
+        $DIR_MOD    = $dir;
+        $epn_Isfind = 1;
+        last if $epn_Isfind;
+    }
+    die "The erpin model '$epn_name' doesn't find. Check your installation for 'ErpinModels'\n"
+        if !$epn_Isfind;
+    
+    # Replace variable in command
+    $command =~ s/%GENCODE%/$GENCODE_ID/g;
+    $command =~ s/%GENOMEFILE%/$GENOMEFILE/g;
+    $command =~ s/%OUTFILE%/$outfile/g;
+    $command =~ s/%MODELDIR%/$DIR_MOD/g;
+    
+    my $erpin_arg = $1 if $command =~ m/-e\s+\"(.+)\"/;
+    die "No erpin argument is passed for command '$command'\n" 
+        if $command !~ m/-e\s+\"(.+)\"/;
+    
+    $command =~ s/\n$//;
+    open(COMFILE, ">$comfile") or die "Could not open commandfile '$comfile'\n";
+    print COMFILE "$command >/dev/null 2>/dev/null \n";
+    close COMFILE;
+    print "Running RNASpinner to identify ${RNA_NAME} with command $command_name...\n";
+    my $ret = system("/bin/sh","$comfile");
+    die "There was an error running 'RNASpinner'.\n" if !( -e "$outfile");
+    my $RNA_prediction_list = &CreateRNAPredictionList($outfile,$erpin_arg,$command_name);
+    
+    push(@$all_list,$RNA_prediction_list);
+    
+    my $rna_pred = $RNA_prediction_list->get_rnapredictions();
+    last if @$rna_pred && $intel eq "minimal";
+}
+
+my $result_list = &MakeChoice($all_list);
+&Create_output($result_list);
+
+print "All done.\n";
+exit 0;
+
+# Cleanup temp directory when program exits.
+END { 
+    return unless defined($TMP_DIR) and $TMP_DIR =~ m#^/tmp/#;
+
+    print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
+    system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
+}
+
+#############################
+#   S U B R O U T I N E S   #
+#############################
+
+sub CreateRNAPredictionList {
+    my $outputfile = shift;
+    my $erpin_arg  = shift;
+    my $group      = shift;
+    
+    die "Error: the file '$outputfile' doesn't exist." if (! -e $outputfile);
+
+    my @erpinMaskNums = ParseErpinArgs(split(/\s+/,$erpin_arg));
+        
+    my $LinStruct  = PirObject::LinStruct->new();
+    my $output_fh  = new IO::File "<$outputfile"
+        or die "Cannot read model output '$outputfile': $!\n";
+    $LinStruct->ImportFromMultipleAlignment($output_fh); # will close the filehandle
+    my $bracket_line  = &CreateBracketLine($LinStruct);
+    my $multalign     = $LinStruct->get_multalign();
+    my $alignedSeqs   = $multalign->get_alignedSeqs();
+    my $bracket_align = PirObject::AlignedSeq->new(
+                                 seqId    => "bracket",
+                                 sequence => $bracket_line
+                                 );
+    splice(@$alignedSeqs,1,0,$bracket_align);
+    my ($RNAsList,$aligned_consensus,$aligned_bracket) 
+           = &CreatetRNAPredictions($CodonTable,$LinStruct,$ANTICODON_ELEMENT_ID,$group,\@erpinMaskNums) if $istRNA;
+       ($RNAsList,$aligned_consensus,$aligned_bracket) 
+           = &CreateRNAPredictions($LinStruct,$group,\@erpinMaskNums)                                    if !$istRNA;
+    my $RNAList = PirObject::RNAPredictionList->new(
+                                 BracketModel   => $aligned_bracket,
+                                 ConsensusModel => $aligned_consensus,
+                                 rnapredictions => $RNAsList
+                                 );
+     return $RNAList;
+}
+
+sub ParseErpinArgs {
+# 2,21 -add 2 3 -add 4 5 6 8 -add 9 -add 11 12 13 14 15 -add 17 18 20 21 -logzero -2 -cutoff 7 13 22 39 52
+	my @command = @_;
+	
+    my @numbers;
+	my $flag = 0;
+	foreach my $bit (@command) {
+		chomp($bit);
+		
+		if($bit =~ m/^-.*$/) {
+			if($bit =~ m/^-add$/) { $flag = 1;}
+			else { $flag = 0;}
+			next;
+		}
+		if( ($flag == 1) and ($bit =~ m/^\d+$/) ) {
+			push @numbers, $bit; 
+		}
+	}
+	return(sort { $a <=> $b } @numbers);
+}
+
+sub CreateBracketLine {
+    my $LinStruct = shift;
+    
+    my $struct_len = $LinStruct->get_structlength();
+    my $id_by_pos  = $LinStruct->get_idsByPos();
+    my $elem_by_id = $LinStruct->get_elemsByIds;
+    
+    my $BracketLine = "";
+    for (my $i = 0; $i < $struct_len; $i++) {
+        my $pos_id    = $id_by_pos->{$i};
+        my $elem      = $elem_by_id->{$pos_id};
+        my $elem_type = $elem->get_elemType();
+        if ($elem_type ne "HELIX") {
+            $BracketLine .= " ";
+            next;
+        }
+        else {
+            my $startL = $elem->get_startposL();
+            my $startR = $elem->get_startposR();
+            my $length = $elem->get_elemLength();
+            if (($startL <= $i) && ($i <= ($startL + $length))){
+                $BracketLine .= "[";
+            }
+            else {
+                $BracketLine .= "]"
+            };
+        }
+    }
+    return $BracketLine;
+}
+
+sub CreatetRNAPredictions { # based on tRNA_res2APCol by Natacha Beck
+    my $codontable = shift; # BioPerl object
+    my $linstruct  = shift; # PirObject containing the model's struct and the aligned results
+    my $ac_ID      = shift; # ID for the anticodon element of the structure
+    my $group      = shift; # Group name based on command name
+    my $erpin_arg  = shift; # Element reserched by erpin
+    
+    my $length_ali  = $linstruct->get_structlength(); # full width, including gaps
+    my $alignedSeqs = $linstruct->get_multalign()->get_alignedSeqs(); # all aligned sequences (results)
+
+    my $elemIndex   = $linstruct->get_elemsByIds();       # hash to locate info for each elem
+    my $ac_elem     = $elemIndex->{"$ac_ID"}              # the element for the anticodon
+        or die "Cannot find element '$ac_ID' for anticodon in structure?!?\n";
+    my $ac_offset   = $ac_elem->get_startposL();
+    my $rac_offset  = $length_ali-$ac_offset-3;  # reverse offset
+    &IsSearch($linstruct,$erpin_arg);
+    
+    my $aligned_consensus = "";
+    my $aligned_bracket   = "";
+    my $predictlist = []; # list of PirObject with full info; we create this here
+    foreach my $res (@$alignedSeqs) {
+        my $contigname     = $res->get_seqId();
+        my $sequence       = $res->get_sequence(); # with gaps
+        $aligned_consensus = &MakeReadableAlign($sequence,$linstruct,"consensus") if $contigname eq "consensus";
+        $aligned_bracket   = &MakeReadableAlign($sequence,$linstruct,"bracket")   if $contigname eq "bracket";
+        next if $contigname eq "consensus";
+        next if $contigname eq "bracket";
+        my $align_seq      = &MakeReadableAlign($sequence,$linstruct);
+        my ($ac,$aa)      = GetAaAndAc($sequence,$ac_offset,$codontable);
+
+        # this is RNAweasel's one-line summary, e.g.
+        # "1 FW   3914:  3983   9.65e-11 genome.fa"
+        my $seqFastaRest = $res->get_seqFastaRest();
+        die "Cannot parse report's summary:\n$seqFastaRest\n"
+            unless $seqFastaRest =~ m/
+                (\d+)\s+                        # 1           result count, unused
+                (RC|FW)\s*                      # FW or RC    result strand
+                (\d+)\s*\:\s*(\d+)\s*           # 23 : 45     start and stop
+                ([\d\.e\-]+)                    # 4.3e-23     evalue
+            /x;
+        my ($resnum,$strand,$tRNA_begin,$tRNA_end,$eval) = ($1,$2,$3,$4,$5);
+
+        my $begin_ac = &DefineAcPos($sequence,$ac_offset,$tRNA_begin)  if $strand eq "FW";
+           $begin_ac = &DefineAcPos($sequence,$rac_offset,$tRNA_begin) if $strand eq "RC";
+        
+        ($tRNA_begin,$tRNA_end) = ($tRNA_end, $tRNA_begin) if $strand eq "RC";
+        
+        # 1 bp adjustment at 3' for Histidines
+        $tRNA_begin-- if ($aa eq "H" && $strand eq "FW");
+        $tRNA_begin++ if ($aa eq "H" && $strand eq "RC");
+
+        my $RNAPrediction = PirObject::RNAPrediction->new(
+            contigname      => $contigname,
+            strand          => ($strand eq "RC" ? "-" : "+"),
+            start           => $tRNA_begin,
+            stop            => $tRNA_end,
+            evalue          => $eval,
+            aacode          => $aa,
+            anticodon_start => $begin_ac,
+            anticodon_stop  => $begin_ac+2,
+            anticodon_seq   => $ac,
+            label           => $group,
+            align           => $align_seq
+        );
+        push(@$predictlist,$RNAPrediction);
+    }
+    return($predictlist,$aligned_consensus,$aligned_bracket);
+}
+
+sub CreateRNAPredictions { # based on tRNA_res2APCol by Natacha Beck
+    my $linstruct  = shift; # PirObject containing the model's struct and the aligned results
+    my $group      = shift; # Group name based on command name
+    my $erpin_arg  = shift; # Element reserched by erpin
+    
+    my $alignedSeqs = $linstruct->get_multalign()->get_alignedSeqs(); # all aligned sequences (results)    
+    &IsSearch($linstruct,$erpin_arg);
+    
+    my $aligned_consensus = "";
+    my $aligned_bracket   = "";
+    my $predictlist = []; # list of PirObject with full info; we create this here
+    foreach my $res (@$alignedSeqs) {
+        my $contigname     = $res->get_seqId();
+        my $sequence       = $res->get_sequence(); # with gaps
+        $aligned_consensus = &MakeReadableAlign($sequence,$linstruct,"consensus") if $contigname eq "consensus";
+        $aligned_bracket   = &MakeReadableAlign($sequence,$linstruct,"bracket")   if $contigname eq "bracket";
+        next if $contigname eq "consensus";
+        next if $contigname eq "bracket";
+        my $align_seq      = &MakeReadableAlign($sequence,$linstruct);
+
+        # this is RNAweasel's one-line summary, e.g.
+        # "1 FW   3914:  3983   9.65e-11 genome.fa"
+        my $seqFastaRest = $res->get_seqFastaRest();
+        die "Cannot parse report's summary:\n$seqFastaRest\n"
+            unless $seqFastaRest =~ m/
+                (\d+)\s+                        # 1           result count, unused
+                (RC|FW)\s*                      # FW or RC    result strand
+                (\d+)\s*\:\s*(\d+)\s*           # 23 : 45     start and stop
+                ([\d\.e\-]+)                    # 4.3e-23     evalue
+            /x;
+        my ($resnum,$strand,$tRNA_begin,$tRNA_end,$eval) = ($1,$2,$3,$4,$5);
+
+        my $RNAPrediction = PirObject::RNAPrediction->new(
+            contigname      => $contigname,
+            strand          => ($strand eq "RC" ? "-" : "+"),
+            start           => $tRNA_begin,
+            stop            => $tRNA_end,
+            evalue          => $eval,
+            label           => $group,
+            align           => $align_seq
+        );
+        push(@$predictlist,$RNAPrediction);
+    }
+    return($predictlist,$aligned_consensus,$aligned_bracket);
+}
+
+sub IsSearch {
+    my $linstruct = shift;
+    my $erpin_arg = shift;
+
+    my $elemsById = $linstruct->get_elemsByIds();
+    while( my ($elem_num, $info) = each %$elemsById ) {
+        my $id = int($elem_num);
+        my $boolean = ( grep(/^$id$/, @$erpin_arg) ? 1 : 0);
+        $info->set_isSearch($boolean);
+    }
+}
+
+sub GetAaAndAc {
+    my $sequence   = shift;
+    my $ac_offset  = shift;
+    my $codontable = shift;
+    
+    my $ac = uc substr($sequence,$ac_offset,3);   # anticodon
+    my $codon = $ac;                              # codon as used in protein
+    $codon = reverse $codon;
+    $codon =~ tr/UTCGA/AAGCT/;
+    my $aa = $codontable->translate($codon) || "X";
+    
+    return($ac,$aa);
+}
+
+sub DefineAcPos {
+    my $sequence   = shift;
+    my $offset     = shift;
+    my $tRNA_begin = shift;
+    
+    my $seq_before_ac  =  substr($sequence,0,$offset);
+    $seq_before_ac  =~ tr/\-//cd;
+    my $begin_ac       = $tRNA_begin + length($seq_before_ac);
+    return $begin_ac;
+}
+
+sub MakeReadableAlign {
+    my $sequence  = shift;
+    my $linstruct = shift;
+    my $type      = shift || "";
+    
+    my $id_by_pos   = $linstruct->get_idsByPos();
+    my $elemsById   = $linstruct->get_elemsByIds();
+    
+    # Upper if element is search else lower case
+    my $aligned_seq = "";
+    my @seq = split(//,$sequence);
+    for (my $i = 0; $i <= $#seq ;$i++){
+        my ($nt,$id)   = ($seq[$i],$id_by_pos->{$i});
+        my $elem = $elemsById->{$id};
+        my $isSearch = $elem->get_isSearch();
+        $aligned_seq .= ( $isSearch  ? uc($nt) : lc($nt));
+    }
+    
+    # Define first and last searched elem
+    my $first_elem_search = 0;
+    for (my $i = 0; $i <= $#seq ;$i++) {
+        my ($nt,$id)   = ($seq[$i],$id_by_pos->{$i});
+        my $elem = $elemsById->{$id};
+        my $isSearch = $elem->get_isSearch();
+        if (!$isSearch) {$first_elem_search++};
+        last if $isSearch;
+    }
+    
+    my $last_elem_search = $#seq;
+    for (my $i = $#seq; $i >= 0 ;$i--){
+        my ($nt,$id)   = ($seq[$i],$id_by_pos->{$i});
+        my $elem = $elemsById->{$id};
+        my $isSearch = $elem->get_isSearch();
+        if (!$isSearch) {$last_elem_search--};
+        last if $isSearch;
+    }
+    
+    # Cut left and right
+    $aligned_seq = $sequence if $type eq "consensus";
+    $aligned_seq = substr($aligned_seq,0,$last_elem_search+1);
+    $aligned_seq = substr($aligned_seq,$first_elem_search);
+    
+    # Change indents position
+    @seq = split(//,$aligned_seq);
+    $aligned_seq    = "";
+    my $prev_id     = -1;
+    my $prev_search =  0;
+    my $nb_indents  =  0;
+    for (my $i = $first_elem_search; $i <= $#seq + $first_elem_search;$i++){
+        my ($nt,$id)   = ($seq[$i-$first_elem_search],$id_by_pos->{$i});
+        my $elem = $elemsById->{$id};
+        my $isSearch = $elem->get_isSearch();
+        $nb_indents++ if $nt eq "-" && $isSearch == 0;
+        if ($prev_id != int($id) && ($isSearch == 1)) {
+            $aligned_seq  .=    ("-" x $nb_indents) if $prev_search == 0;
+        }
+        $aligned_seq  .= $nt if $nt ne "-" || $isSearch == 1;
+        $nb_indents    =  0 if $isSearch == 1;
+        $prev_search   = $isSearch;
+        $prev_id       = int($id);
+    }
+    
+    # Treat the space between element
+    $aligned_seq =~ s/ /-/g if $type eq "bracket";
+    @seq = split(//,$aligned_seq);
+    $aligned_seq   = "";
+    $prev_id       = -1;
+    $prev_search   =  0;
+    my $not_search = [];
+    my $num_elem   = 0;
+    my $nb_space   =  1;
+    for (my $i = $first_elem_search; $i <= $#seq + $first_elem_search ;$i++) {
+        my ($nt,$id)   = ($seq[$i-$first_elem_search],$id_by_pos->{$i});
+        my $elem = $elemsById->{$id};
+        my $isSearch = $elem->get_isSearch();
+        if ($prev_id != int($id)) {
+            $nb_space++ if $prev_search == 0 && $isSearch == 0;
+            $aligned_seq  .=    (" " x $nb_space) if $prev_id != -1 && ($prev_search == 1 || $isSearch == 1);
+            $num_elem++ if ($prev_id != -1 && ($prev_search == 1 || $isSearch == 1));
+            push (@$not_search,$num_elem) if $prev_search == 1 && $isSearch == 0 && $nb_space == 1 && $prev_id != -1;
+        }
+        $aligned_seq  .= $nt;
+        $nb_space      =  1 if $isSearch == 1;
+        $prev_search   = $isSearch;
+        $prev_id       = int($id);
+    }
+    
+    # Treat not searched sequence
+    my @split_elem = split(/\s+/,$aligned_seq);
+    $aligned_seq = "";
+    for (my $i = 0; $i <= $#split_elem ;$i++) {
+        my $elem = $split_elem[$i];
+        $aligned_seq .= "$elem " if  !(grep(/^$i$/, @$not_search));
+        next if !(grep(/^$i$/, @$not_search)) || $elem =~ m/^\s+$/;
+        $aligned_seq .= "$elem " if length($elem) <= 16;
+        next if length($elem) <= 16;
+        my $without_indents = $elem;
+        $without_indents   =~ s/-//g;
+        my $len_without    = length($without_indents);
+        if ($len_without <= 16 ){
+            my $nb_space = 16 - $len_without;
+            $elem = "$without_indents". ("-" x $nb_space);
+            $aligned_seq .= "$elem ";
+            next;
+        }
+        else {
+            my $info_len  = "($len_without)";
+            my $len_right = 7 - length($info_len);
+            my $new_elem .= substr($without_indents,0,3).("." x $len_right)."$info_len".("." x 3).substr($without_indents,$len_without-3,3);
+            $aligned_seq .= "$new_elem ";
+        }
+    }
+    $aligned_seq =~ s/\-/ /g;
+    return $aligned_seq;
+}
+
+sub MakeChoice {
+    my $all_list = shift;
+    
+    for (my $i = 0; $i < scalar(@$all_list) ;$i++) {
+        my $pred_list1 = $all_list->[$i];
+        my $rnapred1   = $pred_list1->get_rnapredictions();
+LOOP1 : for (my $j = scalar(@$rnapred1) - 1 ; $j >= 0 ;$j--){
+            my $pred1 = $rnapred1->[$j];
+            my $cotigname_pred1 = $pred1->get_contigname();
+            my $start_pred1     = $pred1->get_start();
+            my $stop_pred1      = $pred1->get_stop();
+            my $eval_pred1      = $pred1->get_evalue();
+            for (my $k = $i+1; $k < scalar(@$all_list) ;$k++) {
+                my $pred_list2 = $all_list->[$k];
+                my $rnapred2  = $pred_list2->get_rnapredictions();
+     LOOP2 :    for (my $l = scalar(@$rnapred2) - 1 ; $l >= 0 ;$l--){
+                     my $pred2 = $rnapred2->[$l];
+                     my $cotigname_pred2 = $pred2->get_contigname();
+                     next LOOP2 if $cotigname_pred1 ne $cotigname_pred2;
+                     my $start_pred2     = $pred2->get_start();
+                     my $stop_pred2      = $pred2->get_stop();
+                     next LOOP2 if ($stop_pred1 < $start_pred2 || $start_pred1 > $stop_pred2);
+                     my $eval_pred2      = $pred2->get_evalue();
+                     my $comp_val = &CompareHighPrecisionFloats($eval_pred1,$eval_pred2);
+                     next LOOP2 if $comp_val == 0;
+                     splice(@$rnapred2,$l,1) if $comp_val == -1;
+                     splice(@$rnapred1,$j,1) if $comp_val ==  1;
+                }
+            }
+        }
+    }
+    return $all_list;
+}
+
+sub CompareHighPrecisionFloats {
+    # Only for floats that are in NORMALIZED scientific form.
+    # Examples of different cases :
+    #
+    #    1       1.      1.2
+    #    1.2e    1.2e3   1.2e-3
+    #    e-3     1e3
+    #
+    # Each of these can optionally be prefixed with "+" or "-".
+    #
+    # Unlike Math::BigFloat, this routine handles "e-3".
+
+    my ($x,$y) = @_;
+    
+    die "Unparsable number '$x'\n"
+        unless $x =~ m/^([\+\-]?)             # sign
+                        ([\d\.]*)             # significand
+                        (?:e(-?\d*))?         # exponent
+                       $/x;
+    my ($xsig,$xman,$xexp) = ($1,$2,$3);
+    
+    die "Unparsable number '$y'\n"
+        unless $y =~ m/^([\+\-]?)             # sign
+                        ([\d\.]*)             # significand
+                        (?:e(-?\d*))?         # exponent
+                       $/x;
+    my ($ysig,$yman,$yexp) = ($1,$2,$3);
+    
+    # Define missing optional components of number representation
+    $xsig ||= "+";
+    $ysig ||= "+";
+    $xman = 1 if !defined($xman) || $xman eq "";
+    $yman = 1 if !defined($yman) || $yman eq "";
+    $xexp = 0 if !defined($xexp) || $xexp eq "";
+    $yexp = 0 if !defined($yexp) || $yexp eq "";  
+    
+    # Compare numbers when $x or $y are effectively zero
+    return 0
+        if $xman == 0 && $yman == 0;  # $x == 0 and $y == 0
+    return ($xsig eq '-' ? -1 : +1)
+        if $xman != 0 && $yman == 0;  # $x != 0 and $y == 0
+    return ($ysig eq '-' ? +1 : -1)
+        if $xman == 0 && $yman != 0;  # $x == 0 and $y != 0
+    
+    # Easy comparisons when signs differ
+    if ($xsig ne $ysig) {
+        return $xsig eq '+' ? 1 : -1;
+    }
+
+    # Permutate X <=> Y if both signs are negative
+    ($xman,$xexp,$yman,$yexp) = ($yman,$yexp,$xman,$xexp)
+        if $xsig eq '-'; # $ysig is '-' too at this point.
+    
+    # At this point, $x and $y both have mantissas > 0
+    return ($xexp <=> $yexp) if $xexp != $yexp;  # $x and $y have different EXP, so compare EXP
+    return ($xman <=> $yman);                    # $x and $y have same EXP, so compare mantissas
+}
+
+sub Create_output {
+    my $result_list = shift;
+    
+    my $name_file  = basename("$GENOMEFILE");
+    my $genomename = $1 if $name_file =~ m/^(\w+)/;
+    my $output     = ( $OUTFILE eq "" ? "${RNA_NAME}_$genomename.out" : $OUTFILE);
+    my $count = "";
+    my $name  = $output;
+
+    # Checking to see if the path to the output file is writable
+    die "\nThe path to where your outputfile will be produced is not writable by you ($name).\nPlease resolve this problem before running again\n"
+        if (!-w (dirname($name)));
+
+    # Determing new name of output file if file already exists
+    # Just if option -o is not defined
+    if ($OUTFILE eq ""){
+        chomp ($name);
+        $name =~ s/\d*$//; 
+        while (-r ("$name"."$count")) {
+            if ($count eq "") {$count = 1;}
+            else              {$count++;} 
+        }
+        $output = "$name"."$count";
+    }
+    
+	open(OUTPUT, ">$output") or die "Could not open outputfile '$output'\n";
+
+    # Define max length align
+    my $len_ali = 0;
+    foreach my $result (@$result_list) {
+        my $rna_pred = $result->get_rnapredictions();
+        next if !@$rna_pred;
+        my $consensus = $result->get_ConsensusModel();
+        my $len_cons  = length($consensus);
+           $len_ali   = ( $len_ali > $len_cons ? $len_ali : $len_cons);
+    }
+        
+    # Create output
+    my $FORMAT    = (  $istRNA ? "%-35s %-15s %-16s %-16s %-3s %-5s %-3s %-9s  %s\n"
+                               : "%-35s %-15s %-16s %-3s %-11s  %s\n");
+    printf OUTPUT $FORMAT,"Sequence name","Group","Positions","Ac Positions","Aa","Ac","Str","E-value","Alignment"      if  $istRNA;
+    printf OUTPUT $FORMAT,"Sequence name","Group","Positions","Str","E-value","Alignment"                               if !$istRNA;
+    printf OUTPUT $FORMAT,("-" x 35), ("-" x 15), ("-" x 16), ("-" x 16), "---", ("-" x 5), "---",("-" x 9), ("-" x 11) if  $istRNA  && $len_ali == 0;
+    printf OUTPUT $FORMAT,("-" x 35), ("-" x 15), ("-" x 16), "---", ("-" x 9), ("-" x 11)                              if !$istRNA  && $len_ali == 0;
+    printf OUTPUT "\nNo result found for ${RNA_NAME} \n" if $len_ali == 0;
+    
+    my $for_print = "";
+    foreach my $result (@$result_list) {
+        my $rna_pred = $result->get_rnapredictions();
+        next if !@$rna_pred;
+        printf OUTPUT $FORMAT,("-" x 35), ("-" x 15), ("-" x 16), ("-" x 16), "---", ("-" x 5), "---",("-" x 9), ("-" x $len_ali) if  $istRNA;
+        printf OUTPUT $FORMAT,("-" x 35), ("-" x 15), ("-" x 16), "---", ("-" x 9), ("-" x $len_ali)                              if !$istRNA;
+        
+        my $brackets  = $result->get_BracketModel();
+        printf OUTPUT $FORMAT,"", "", "", "", "", "", "", "", $brackets if  $istRNA;
+        printf OUTPUT $FORMAT,"", "", "", "", "", $brackets             if !$istRNA;
+        
+        my $consensus = $result->get_ConsensusModel();
+        printf OUTPUT $FORMAT,"", "", "", "", "", "", "", "", $consensus if  $istRNA;
+        printf OUTPUT $FORMAT,"", "", "", "", "", $consensus             if !$istRNA;
+        foreach my $pred (@$rna_pred) {
+            my $pos    = $pred->get_start()."..".$pred->get_stop();
+            my $aa_pos = $pred->anticodon_start()."..".$pred->anticodon_stop() if $istRNA;
+            my $strand = ( $pred->get_strand() eq "+" ? "FW" : "RC" );
+            printf OUTPUT $FORMAT,$pred->get_contigname(), $pred->get_label(), $pos, $aa_pos, $pred->get_aacode(), $pred->get_anticodon_seq(), $strand, $pred->get_evalue(), $pred->get_align() if  $istRNA;
+            printf OUTPUT $FORMAT,$pred->get_contigname(), $pred->get_label(), $pos, $strand, $pred->get_evalue(), $pred->get_align()                                                        if !$istRNA; # report line.
+        }
+    }
+    close OUTPUT;
+    print "Saving output to '$output'...\n";
+}
