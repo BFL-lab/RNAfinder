@@ -28,9 +28,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.1 2008/10/28 21:57:23 nbeck Exp $
+#    $Id: RNAfinder,v 1.2 2008/10/28 22:40:14 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.2  2008/10/28 22:40:14  nbeck
+#    Change environment variables.
+#
 #    Revision 1.1  2008/10/28 21:57:23  nbeck
 #    Initial check-in.
 #
@@ -51,7 +54,7 @@ use vars qw( $VERSION $RCS_VERSION );
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION = '$Id: RNAfinder,v 1.1 2008/10/28 21:57:23 nbeck Exp $';
+$RCS_VERSION = '$Id: RNAfinder,v 1.2 2008/10/28 22:40:14 nbeck Exp $';
 ($VERSION)   = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -70,7 +73,7 @@ my @CFG_PATH      = (
     # You can add other search directories here
     ($ENV{"HOME"} || "."),
 );
-push(@CFG_PATH,split(/:/,$ENV{"CFG_PATH"}))
+push(@CFG_PATH,split(/:/,$ENV{"RNAFinder_CFG_PATH"}))
     if $ENV{"CFG_PATH"};
    
     
@@ -337,7 +340,7 @@ my @EPN_PATH      = (
     ($ENV{"HOME"} || ".") . "/ErpinModels",
 );
 
-push(@EPN_PATH,split(/:/,$ENV{"EPN_PATH"}))
+push(@EPN_PATH,split(/:/,$ENV{"RNAfinder_EPN_PATH"}))
     if $ENV{"EPN_PATH"};
    
 foreach my $command_name (@tab_of_command) {
