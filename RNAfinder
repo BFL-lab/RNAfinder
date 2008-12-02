@@ -13,14 +13,15 @@
 #############################################################################
 #                                 RNAfinder                                 #
 #                                                                           #
-#                            Copyright (C) 1994                             #
-#                        Departement de Biochimie,                          #
-#                         Universite de Montreal,                           #
-#                    C.P. 6128, succursale Centre-ville,                    #
-#                     Montreal, Quebec, Canada, H3C 2J7                     #
+#                          Copyright (C) 2008                               #
+#                         Departement de Biochimie,                         #
+#                          Universite de Montreal,                          #
+#                     C.P. 6128, succursale Centre-ville,                   #
+#                      Montreal, Quebec, Canada, H3C 2J7                    #
 #                                                                           #
-#                      Programming: Natacha Beck (OGMP)                     #
-#                  E-Mail information: natabeck@gmail.com                   #
+#                       Programming: Natacha Beck                           #
+#                Project management: Franz Lang (OGMP)                      #
+#                E-Mail information: natabeck@gmail.com                     #
 #                                                                           #
 #     This software is distributed under the GNU GENERAL PUBLIC LICENSE, as #
 # published by the Free Software Foundation. A copy of version 2 of this    #
@@ -28,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.4 2008/10/28 23:10:25 nbeck Exp $
+#    $Id: RNAfinder,v 1.5 2008/12/02 15:36:54 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.5  2008/12/02 15:36:54  nbeck
+#    Fixed bug for Ac localisation.
+#
 #    Revision 1.4  2008/10/28 23:10:25  nbeck
 #    Fixed bug for environment variables.
 #
@@ -60,7 +64,7 @@ use vars qw( $VERSION $RCS_VERSION );
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION = '$Id: RNAfinder,v 1.4 2008/10/28 23:10:25 nbeck Exp $';
+$RCS_VERSION = '$Id: RNAfinder,v 1.5 2008/12/02 15:36:54 nbeck Exp $';
 ($VERSION)   = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -90,7 +94,7 @@ foreach my $dir (@CFG_PATH) {
     $DIR_CFG    = $dir;
     last;
 }
-die "The config file '.RNAfinder.cfg' doesn't find. Check your installation for this one\n"
+die "The config file '.RNAfinder.cfg' doesn't find. Check your installation for this one.\n"
     if !$DIR_CFG;
 
 # Treatment of config file.
@@ -104,7 +108,7 @@ my $dynamic_help    = &CreateDynamicHelp($geneprogs);
 # Check arguments numbers #
 ###########################
 if (@ARGV == 0) {
-	print "\nThere were no arguments passed on the command line. This program takes arguments\n";
+	print "\nThere were no arguments passed on the command line. This program takes arguments.\n";
 	Usage();
 }
 
@@ -165,7 +169,7 @@ die "Genetic code ID supplied with -c must be a number.\n"
 die "Element number supplied with -a must be a number.\n"
     if $ANTICODON_ELEMENT_ID !~ /^\d+$/;
     
-die "Sequence file $GENOMEFILE does not exist\n"
+die "Sequence file $GENOMEFILE does not exist.\n"
 	    if (!-e $GENOMEFILE );
     
 # Make case insensitive.
@@ -332,11 +336,11 @@ my $CodonTable = Bio::Tools::CodonTable->new( -id => $GENCODE_ID )
     or die "Cannot find codon table for genetic code id '$GENCODE_ID' ?!?\n";
 
 
-die "Model : '$MODEL' not found for RNA : '$RNA_NAME' in $CONFIGFILE\n" 
+die "Model : '$MODEL' not found for RNA : '$RNA_NAME' in $CONFIGFILE.\n" 
     if !$modelList->{lc $MODEL};
     
 my $List_of_commands = $modelList->{lc $MODEL}
-    or die "Model '$MODEL' does not exist in config file for gene '$RNA_NAME'\n";
+    or die "Model '$MODEL' does not exist in config file for gene '$RNA_NAME'.\n";
 my @tab_of_command   = split(/,/,$List_of_commands);
 
 my $all_list = ();
@@ -356,7 +360,7 @@ foreach my $command_name (@tab_of_command) {
     
     #Check for .epn 
     my $epn_name = $1 if $command =~ m/%MODELDIR%\/(.+.epn)/;
-    die "RNASpinner must have -m option with argument '\%MODELDIR\%/model_file.epn'\n"
+    die "RNASpinner must have -m option with argument '\%MODELDIR\%/model_file.epn'.\n"
         if $command !~  m/%MODELDIR%\/(.+.epn)/;
     my $epn_Isfind = 0;
     my $DIR_MOD    = "";
@@ -366,7 +370,7 @@ foreach my $command_name (@tab_of_command) {
         $epn_Isfind = 1;
         last if $epn_Isfind;
     }
-    die "The erpin model '$epn_name' doesn't find. Check your installation for 'ErpinModels'\n"
+    die "The erpin model '$epn_name' doesn't find. Check your installation for 'ErpinModels'.\n"
         if !$epn_Isfind;
     
     # Replace variable in command
@@ -376,11 +380,11 @@ foreach my $command_name (@tab_of_command) {
     $command =~ s/%MODELDIR%/$DIR_MOD/g;
     
     my $erpin_arg = $1 if $command =~ m/-e\s+\"(.+)\"/;
-    die "No erpin argument is passed for command '$command'\n" 
+    die "No erpin argument is passed for command '$command'.\n" 
         if $command !~ m/-e\s+\"(.+)\"/;
     
     $command =~ s/\n$//;
-    open(COMFILE, ">$comfile") or die "Could not open commandfile '$comfile'\n";
+    open(COMFILE, ">$comfile") or die "Could not open commandfile '$comfile'.\n";
     print COMFILE "$command >/dev/null 2>/dev/null \n";
     close COMFILE;
     print "Running RNASpinner to identify ${RNA_NAME} with command $command_name...\n";
@@ -520,6 +524,7 @@ sub CreatetRNAPredictions { # based on tRNA_res2APCol by Natacha Beck
     foreach my $res (@$alignedSeqs) {
         my $contigname     = $res->get_seqId();
         my $sequence       = $res->get_sequence(); # with gaps
+        my $rev_sequence   = reverse $sequence;
         $aligned_consensus = &MakeReadableAlign($sequence,$linstruct,"consensus") if $contigname eq "consensus";
         $aligned_bracket   = &MakeReadableAlign($sequence,$linstruct,"bracket")   if $contigname eq "bracket";
         next if $contigname eq "consensus";
@@ -540,7 +545,7 @@ sub CreatetRNAPredictions { # based on tRNA_res2APCol by Natacha Beck
         my ($resnum,$strand,$tRNA_begin,$tRNA_end,$eval) = ($1,$2,$3,$4,$5);
 
         my $begin_ac = &DefineAcPos($sequence,$ac_offset,$tRNA_begin)  if $strand eq "FW";
-           $begin_ac = &DefineAcPos($sequence,$rac_offset,$tRNA_begin) if $strand eq "RC";
+           $begin_ac = &DefineAcPos($rev_sequence,$rac_offset,$tRNA_begin) if $strand eq "RC";
         
         ($tRNA_begin,$tRNA_end) = ($tRNA_end, $tRNA_begin) if $strand eq "RC";
         
@@ -644,7 +649,7 @@ sub DefineAcPos {
     my $tRNA_begin = shift;
     
     my $seq_before_ac  =  substr($sequence,0,$offset);
-    $seq_before_ac  =~ tr/\-//cd;
+       $seq_before_ac  =~ tr/\-//d;
     my $begin_ac       = $tRNA_begin + length($seq_before_ac);
     return $begin_ac;
 }
@@ -861,13 +866,13 @@ sub Create_output {
     my $result_list = shift;
     
     my $name_file  = basename("$GENOMEFILE");
-    my $genomename = $1 if $name_file =~ m/^(\w+)/;
+    my $genomename = $name_file;
     my $output     = ( $OUTFILE eq "" ? "${RNA_NAME}_$genomename.out" : $OUTFILE);
     my $count = "";
     my $name  = $output;
 
     # Checking to see if the path to the output file is writable
-    die "\nThe path to where your outputfile will be produced is not writable by you ($name).\nPlease resolve this problem before running again\n"
+    die "\nThe path to where your outputfile will be produced is not writable by you ($name).\nPlease resolve this problem before running again.\n"
         if (!-w (dirname($name)));
 
     # Determing new name of output file if file already exists
@@ -882,7 +887,7 @@ sub Create_output {
         $output = "$name"."$count";
     }
     
-	open(OUTPUT, ">$output") or die "Could not open outputfile '$output'\n";
+	open(OUTPUT, ">$output") or die "Could not open outputfile '$output'.\n";
 
     # Define max length align
     my $len_ali = 0;
@@ -918,7 +923,8 @@ sub Create_output {
         printf OUTPUT $FORMAT,"", "", "", "", "", "", "", "", $consensus if  $istRNA;
         printf OUTPUT $FORMAT,"", "", "", "", "", $consensus             if !$istRNA;
         foreach my $pred (@$rna_pred) {
-            my $pos    = $pred->get_start()."..".$pred->get_stop();
+            my $pos    = (  $pred->get_strand() eq "+" ? 
+                            $pred->get_start()."..".$pred->get_stop() : $pred->get_stop()."..".$pred->get_start());
             my $aa_pos = $pred->anticodon_start()."..".$pred->anticodon_stop() if $istRNA;
             my $strand = ( $pred->get_strand() eq "+" ? "FW" : "RC" );
             printf OUTPUT $FORMAT,$pred->get_contigname(), $pred->get_label(), $pos, $aa_pos, $pred->get_aacode(), $pred->get_anticodon_seq(), $strand, $pred->get_evalue(), $pred->get_align() if  $istRNA;
