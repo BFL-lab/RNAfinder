@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.5 2008/12/02 15:36:54 nbeck Exp $
+#    $Id: RNAfinder,v 1.6 2008/12/03 15:07:42 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.6  2008/12/03 15:07:42  nbeck
+#    Added support for partial RNA and changed help message.
+#
 #    Revision 1.5  2008/12/02 15:36:54  nbeck
 #    Fixed bug for Ac localisation.
 #
@@ -64,7 +67,7 @@ use vars qw( $VERSION $RCS_VERSION );
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION = '$Id: RNAfinder,v 1.5 2008/12/02 15:36:54 nbeck Exp $';
+$RCS_VERSION = '$Id: RNAfinder,v 1.6 2008/12/03 15:07:42 nbeck Exp $';
 ($VERSION)   = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -98,11 +101,11 @@ die "The config file '.RNAfinder.cfg' doesn't find. Check your installation for 
     if !$DIR_CFG;
 
 # Treatment of config file.
-my $CONFIGFILE      = "$DIR_CFG/.RNAfinder.cfg";
+my $CONFIGFILE               = "$DIR_CFG/.RNAfinder.cfg";
 
-my $conf_file       = PirObject::RNAfinderConfigFile->ImportFromTextFile($CONFIGFILE);
-my $geneprogs       = $conf_file->get_geneprogs();
-my $dynamic_help    = &CreateDynamicHelp($geneprogs);
+my $conf_file                = PirObject::RNAfinderConfigFile->ImportFromTextFile($CONFIGFILE);
+my $geneprogs                = $conf_file->get_geneprogs();
+my ($RNA_list,$MODEL_list) = &CreateDynamicHelp($geneprogs);
 
 ###########################
 # Check arguments numbers #
@@ -206,7 +209,7 @@ sub Usage {
 
 This is $BASENAME $VERSION, by Natacha Beck.
 
-Usage: $BASENAME [-d] -n RNAname -g fastagenome -m model [-c gencodeid] [-a anticodon_id]
+Usage: $BASENAME [-d] -n RNAname -m model -g fastagenome [-c gencodeid] [-a anticodon_id]
 
 This program will search for and identify RNAs in a genome. It is a wrapper
 around a search tool called 'RNASpinner', that needs to be installed on your system.
@@ -216,18 +219,18 @@ around a search tool called 'RNASpinner', that needs to be installed on your sys
 Input data options:
 -------------------
 
+-n RNAname       Name of RNAs sought. Each supported RNAs must have a definition
+                 block on ConfigFile ('.RNAfinder.cfg').
+                 List of RNAs : $RNA_list
+                 
+-m modelfile     Model name to use.
+                 For each RNA, here's the list of models available :\n$MODEL_list\n
+                 
 -g fastagenome   A file containing the genome sequence to search, in FASTA
                  format. Warning: because of restrictions in how some
                  subprocesses (notable erpin itself) handle FASTA headers,
                  make sure that the first word of each header is unique and
                  not too long.
-
--n RNAname       Name of RNAs sought. Each supported RNAs must have a definition
-                 block on ConfigFile ('.RNAfinder.cfg').
-                 
--m modelfile     A erpin model file for RNA. This program is distributed
-                 with differents models like : "tRNA.epn", "rnpB.epn"...
-                 See also the documentation for option -a below for tRNA.
 
 -c gencodeid     The genetic code used by the organism in the fastagenome.
                  This is Bio::Tools::CodonTable number, which corresponds to
@@ -253,11 +256,6 @@ Other options:
                  to the end of the file, incremented by 1 from the largest
                  number appended to existing file.
                  
-Possibility of annotation:
---------------------------
-
-$dynamic_help
-
 Credits:
 --------
 
@@ -292,11 +290,7 @@ sub CreateDynamicHelp {
         my $commandset = $geneprogs->{$RNA_name};
         $RNA_list     .= $commandset->get_genename().",";
     }
-    $RNA_list =~ s/,$/\./;
-    my $for_add_in_help = 
-"RNAfinder can make the annotation of following RNAs :
-    - $RNA_list\n\n
-For each RNA, here's the list of models available :\n";
+    my $MODEL_list = "";
     foreach my $RNA_name (sort { $a cmp $b } keys(%$geneprogs) ) {
         my $commandset = $geneprogs->{$RNA_name};
         my $name       = $commandset->get_genename();
@@ -306,9 +300,9 @@ For each RNA, here's the list of models available :\n";
             $mlist .= "$model,";
         }
         $mlist =~ s/,$/\./;
-        $for_add_in_help .= "    - $name : $mlist\n";
+        $MODEL_list .= "                     - $name : $mlist\n";
     }
-    return $for_add_in_help;
+    return ($RNA_list,$MODEL_list);
 }
     
 ################
@@ -539,7 +533,7 @@ sub CreatetRNAPredictions { # based on tRNA_res2APCol by Natacha Beck
             unless $seqFastaRest =~ m/
                 (\d+)\s+                        # 1           result count, unused
                 (RC|FW)\s*                      # FW or RC    result strand
-                (\d+)\s*\:\s*(\d+)\s*           # 23 : 45     start and stop
+                (\-*\d+)\s*\:\s*(\-*\d+)\s*     # 23 : 45     start and stop
                 ([\d\.e\-]+)                    # 4.3e-23     evalue
             /x;
         my ($resnum,$strand,$tRNA_begin,$tRNA_end,$eval) = ($1,$2,$3,$4,$5);
