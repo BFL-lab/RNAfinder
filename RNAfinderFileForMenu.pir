@@ -19,9 +19,12 @@
 #       pos_ac = "13"
 # Between "Item" and "EndItem" if the anticodon is the 13 element of the model.
 #
-# $Id: RNAfinderFileForMenu.pir,v 1.1 2009/07/21 15:58:18 nbeck Exp $
+# $Id: RNAfinderFileForMenu.pir,v 1.2 2009/07/23 19:36:00 nbeck Exp $
 #
 # $Log: RNAfinderFileForMenu.pir,v $
+# Revision 1.2  2009/07/23 19:36:00  nbeck
+# Added -c Option, and change Usage.
+#
 # Revision 1.1  2009/07/21 15:58:18  nbeck
 # Fusion between RNASpinner and RNAfinder.
 #
@@ -39,7 +42,7 @@ MenuList           	    array	        <MenuList>      Menu list
 - EndFieldsTable
 - Methods
 
-our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.1 2009/07/21 15:58:18 nbeck Exp $';
+our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.2 2009/07/23 19:36:00 nbeck Exp $';
 our ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 
 # Sample format of text file
@@ -83,17 +86,25 @@ sub ImportFromTextFile {
         $name =~ s/\s+//;
         die "Error: genename '$name' line '$count_line' seen more than once in file '$filename'.\n"
             if exists $MenuList->{lc($name)};
-            
+        
+        while (@file && $file[0] =~ m/^\s*$|^\s*#/){
+                shift(@file);
+                $count_line++;
+        }
+        die "Error: unparsable line '$count_line' in '$filename' (expected \"comment=\"), got:\n$line"
+            if ($file[0] !~ m/^\s*comment?\s*=\s*(\w+)\s*$/i);
+        my $ModelComment = $1;
+        shift(@file);
+        $count_line++;
+
+        
         my $List = new PirObject::MenuList(
             ItemSet => {},
-            OriName => $name
+            OriName => $name,
+            Comment => $ModelComment
         );
         
         my $ItemSet = $List->get_ItemSet();
-        while (@file && $file[0] =~ m/^\s*$|^\s*#/) {
-            shift(@file);
-            $count_line++;
-        }
         my $Item_counter = 0;
         while (@file) {
             while (@file && $file[0] =~ m/^\s*$|^\s*#/){
@@ -108,7 +119,7 @@ sub ImportFromTextFile {
             $count_line++;
             
             $Item_counter++;
-            my $autorized_fields = ["erpin_arg","model_file","label","pos_ac","comment","module"];
+            my $autorized_fields = ["erpin_arg","model_file","label","pos_ac","comment","module","cutoff"];
             my $Item = new PirObject::Item();
             while (@file && $file[0] !~ m/^\s*EndItem\s*$/i) {
                 my $line_b = shift(@file);
@@ -123,6 +134,7 @@ sub ImportFromTextFile {
                 
                 die "Field : '$field' line '$count_line' isn't autorized, line '$count_line'.\n" 
                     if !(grep(/^$field/, @$autorized_fields));
+                $Item->set_cutoff($value)    if $field eq "cutoff";
                 $Item->set_erpinArg($value)  if $field eq "erpin_arg";
                 $Item->set_modelFile($value) if $field eq "model_file";
                 $Item->set_Label($value)     if $field eq "label";
@@ -138,6 +150,7 @@ sub ImportFromTextFile {
             
             die "Item$Item_counter for block '$name' haven't erpin arguments, line '$count_line'.\n" if !($Item->get_erpinArg());
             die "Item$Item_counter for block '$name' haven't model file, line'$count_line'\n."       if !($Item->get_modelFile());
+            die "Item$Item_counter for block '$name' haven't comment, line '$count_line'.\n"         if !($Item->get_comment());
             $ItemSet->{$Item_counter} = $Item;
         }
         $MenuList->{lc($name)} = $List;

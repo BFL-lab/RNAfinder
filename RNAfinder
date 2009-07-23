@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.7 2009/07/21 15:58:17 nbeck Exp $
+#    $Id: RNAfinder,v 1.8 2009/07/23 19:36:00 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.8  2009/07/23 19:36:00  nbeck
+#    Added -c Option, and change Usage.
+#
 #    Revision 1.7  2009/07/21 15:58:17  nbeck
 #    Fusion between RNASpinner and RNAfinder.
 #
@@ -75,7 +78,7 @@ use vars qw( $VERSION $RCS_VERSION );
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.7 2009/07/21 15:58:17 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.8 2009/07/23 19:36:00 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -108,96 +111,13 @@ print "This is $BASENAME version $VERSION.\n";
 
 #How to use this script message
 sub Usage {
-    my $menu = &CreateMenuList($MENU_FILE);
 	print <<USAGE;
 
-This is $BASENAME $VERSION, by Natacha Beck.
-
-Usage: $BASENAME [-d] [-c genetic code] -g fastagenome -m model
-                   [-A alignedOut] [-L logOut] [-X xmlOut] [-C CustomOut]
-
-This program will search for and identify RNAs in a genome. It is a wrapper
-around a search tool called 'erpin' [1], that needs to be installed on your
-system.
-
-Input data options:
--------------------
-
--c               The genetic code only use for tRNA in order to defined anticodon.
-                 
--g fastagenome   A file containing the genome sequence to search, in FASTA
-                 format. Warning: because of restrictions in how some
-                 subprocesses (notable erpin itself) handle FASTA headers,
-                 make sure that the first word of each header is unique and
-                 not too long.
-
--m model         Name of model you want to use.
-                 Use the file $MENUFILE in order to define model name, 
-                 erpin arguments and model file, tRNA position, label
-                 and comment.
-                 If you want to add or to modify some model you can make
-                 a copy of $MENUFILE on your current directory and modify this one.
-                 RNAfinder looking for this file in the following order : 
-                 current directory and directory defined by global variable
-                 'RNAFINDER_CFG_PATH'.
-                 Possibility to combine different models in this case you must
-                 separate the different names by a comma as in 'rnpB,tRNA'.
-                 
-                 Available models are :
-                 $menu
-                 
-Output report options:
-----------------------
-
-There are 4 different reports that can be created by this program.
-You can ask any or all of them to be created.
-The default output option is -C where the output file will be named 
-'fastagenome' + ".csm".
-
--A alignedOut    This report is a concatenation of results in the same format 
-                 as the erpin model file supplied with -m.
-
--L logOut        This is a human-readable report, condensed to show only
-                 the area around the erpin elements that were searched for.
-                 
--X xmlOut        This is a file containing a series of XML documents, one
-                 document per RNA. The XML output looks like this:
-                    <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-                    <!DOCTYPE RNAPredictionList SYSTEM "RNAPredictionList.dtd">
-                    <RNAPredictionList>
-                      <Name>intronII</Name>
-                      <NumItem>1</NumItem>
-                      <Label>II</Label>
-                      <rnapredictions struct="array" type="RNAPrediction">
-                        <RNAPrediction>
-                          <contigname>128gsm5</contigname>
-                          <strand>+</strand>
-                          <start>3118</start>
-                          <stop>3275</stop>
-                        </RNAPrediction>
-                        <RNAPrediction>
-                          <contigname>128gsm5</contigname>
-                          <strand>+</strand>
-                          <start>27369</start>
-                          <stop>27524</stop>
-                        </RNAPrediction>
-                      </rnapredictions>
-                    </RNAPredictionList>
-
--C customOut     This is a simple text output.
-                 The RNA information is the same as the one produced
-                 by the -X option (including coordinate adjustments and
-                 anticodon identification for tRNA).
-
-Other options:
---------------
-
--d               Turn on debug mode; some temporary files will be left in
-                 a subdirectory created in /tmp, available for inspection.
+    This program will search for and identify RNAs. It is a wrapper around a search tool
+called 'erpin' [1], that needs to be installed on your system.
 
 Credits:
 --------
-
 erpin:
     [1] Gautheret D, Lambert A. (2001) Direct RNA Motif Definition and Identification
         from Multiple Sequence Alignments using Secondary Structure Profiles.
@@ -216,19 +136,67 @@ This program ($BASENAME):
     Beck Natacha, Departement de Biochimie, Universite de Montreal.
     natabeck\@gmail.com
 
+Usage:
+-------------------
+$BASENAME [-d] [-c genetic code] -g fastagenome -m model
+               [-A alignedOut] [-L logOut] [-X xmlOut] [-C CustomOut]
+
+Input data options:
+-------------------
+-c               Genetic code, only use for tRNA in order to defined anticodon.
+                 
+-d data          File containing sequence to search, in FASTA format.
+                 Warning: because of restrictions in how some subprocesses
+                 (notable erpin itself) handle FASTA headers, make sure that
+                 the first word of each header is unique and not too long.
+
+-m model         Name of model you want to use. Use the file $MENUFILE 
+                 to define model name, erpin arguments, model file ...
+                 If you want to add or to modify some model you can make
+                 a copy on your current directory and modify this one.
+                 RNAfinder looking for this in the following order : current 
+                 directory and directory defined by global variable 'RNAFINDER_CFG_PATH'.
+                 Possibility to combine different models in this case you must
+                 separate the different names by a comma as in 'rnpB,tRNA'.
+                 
+Output report options:
+----------------------
+4 different reports can be created by this program, you can ask any or all of them to be created.
+Default output option is -C, the output file will be named 'fastagenome' + ".csm".
+
+-A alignedOut    Is a concatenation of results in the same format 
+                 as the erpin model supplied with -m.
+
+-L logOut        Is a human-readable report, condensed to show only 
+                 the area around the erpin elements that were searched for.
+                 
+-X xmlOut        This is a file containing a series of XML documents, one
+                 document per RNA.
+
+-C customOut     Is a simple text output. The RNA information is the same as the one produced
+                 by the -X option.
+
+Other options:
+--------------
+-l               List of available models. Create with Menufile. Accepted value 1 or 2.
+
+-d               Turn on debug mode; some temporary files will be left in
+                 a subdirectory created in /tmp, available for inspection.
 USAGE
-    exit 1;
+exit 1;
 }
 
 sub CreateMenuList {
-    my $menu_file = shift;
+    my ($menu_file,$lvl) = @_;
     
     my $Menu = "";
     my $menulist = $MENU_LIST;
     for my $ItemSet_name ( sort keys %$menulist ) {
-        my $ItemSet = $menulist->{$ItemSet_name};
-        my $OriName = $ItemSet->{'OriName'};
+        my $ItemSet    = $menulist->{$ItemSet_name};
+        my $OriName    = $ItemSet->{'OriName'};
+        my $ModComment = $ItemSet->{'Comment'};
         $Menu .= "\nModel name : $OriName\n";
+        $Menu .= "Comment    : $ModComment\n";
            $ItemSet = $ItemSet->{'ItemSet'};
         my $Item_count = 1;
         foreach my $Item_num ( keys %$ItemSet){
@@ -238,14 +206,20 @@ sub CreateMenuList {
             my $posAc     = $Item->get_AcId()       || "";
             my $label     = $Item->get_Label()      || "";
             my $comment   = $Item->get_comment()    || "";
+            my $cutoff    = $Item->get_cutoff()     || "";
             
-            $Menu .= "\tItem$Item_count\n";
-            $Menu .= "\t\terpin arguments    : $erpinArg\n"  if $erpinArg;
-            $Menu .= "\t\tModel file         : $modelFile\n" if $modelFile;
-            $Menu .= "\t\tAnticodon position : $posAc\n"     if $posAc;
-            $Menu .= "\t\tLabel              : $label\n"     if $label;
-            $Menu .= "\t\tComment            : $comment\n"   if $comment && $comment ne '""';
-
+            if ($lvl == 2 ) {
+                $Menu .= "\tItem$Item_count\n";
+                $Menu .= "\t\terpin arguments    : $erpinArg\n"  if $erpinArg;
+                $Menu .= "\t\tModel file         : $modelFile\n" if $modelFile;
+                $Menu .= "\t\tCutoff             : $cutoff\n"    if $cutoff;
+                $Menu .= "\t\tAnticodon position : $posAc\n"     if $posAc;
+                $Menu .= "\t\tLabel              : $label\n"     if $label;
+                $Menu .= "\t\tComment            : $comment\n"   if $comment && $comment ne '""';
+            }
+            else {
+                $Menu .= "\tItem$Item_count : $comment\n";
+            }
             $Item_count++;
         }
     }
@@ -289,7 +263,7 @@ sub CheckModuleList {
 # Check arguments numbers #
 ###########################
 if (@ARGV == 0) {
-	print "\nThere were no arguments passed on the command line. This program takes arguments\n";
+	print "There were no arguments passed on the command line. This program takes arguments\n";
 	Usage();
 }
 
@@ -300,13 +274,13 @@ if (@ARGV == 0) {
 $|=1;
 
 # Input options
-my $GENOMEFILE     = ""; # -g
+my $DATAFILE       = ""; # -d
 my $MODELNAME      = ""; # -m
-my $MODELFILE      = ""; # doit etre supprimer a terme xxxxx
-my $GENETICCODE    = "";  # -c
+my $GENETICCODE    = ""; # -c
 
 # Default parameters for the script
-my $DEBUG          =  0; # -d 
+my $DEBUG          =  0; # -D
+my $LIST           =  0; # -l
 my $TMP_DIR        = "/tmp/RNAfinder.$$";
 
 # Output options
@@ -317,9 +291,8 @@ my $XMLOUTFILE     = ""; # -X
 my $CUSTOMOUTFILE  = ""; # -C
 
 # Other
-my $ERPINARGS   = "";
-my $LOG_LABEL   = "";
 my $CODON_TABLE = "";
+my $POURCENT    = "";
 
 ###########################
 # Deal with the arguments #
@@ -327,11 +300,11 @@ my $CODON_TABLE = "";
 
 for (;@ARGV;) {
     # Add in the regex [] ALL single-character command-line options
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([dcgmALXC])(.*)$/);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([dcmlALXCPD]|pc)(.*)$/);
     last if ! defined $opt;
     # Add in regex [] ONLY single-character options that
     # REQUIRE an argument, except for the 'd' debug switch.
-    if ($opt =~ /[cgmALXC]/ && $arg eq "") {
+    if ($opt =~ /[dcmlALXCP]|pc/ && $arg eq "") {
         if (@ARGV < 2) {
             print "Argument required for option \"$opt\".\n";
             exit 1;
@@ -339,15 +312,24 @@ for (;@ARGV;) {
         shift;
         $arg=$ARGV[0];
     }
-    $DEBUG                = ($arg ? $arg : 1) if $opt eq 'd';
+    $POURCENT             = $arg              if $opt eq 'pc';
     $GENETICCODE          = $arg              if $opt eq 'c';
-    $GENOMEFILE           = $arg              if $opt eq 'g';
+    $DATAFILE             = $arg              if $opt eq 'd';
     $MODELNAME            = $arg              if $opt eq 'm';
     $ALIGNEDOUTFILE       = $arg              if $opt eq 'A';
     $REPORTFILE           = $arg              if $opt eq 'L';
     $XMLOUTFILE           = $arg              if $opt eq 'X';
     $CUSTOMOUTFILE        = $arg              if $opt eq 'C';
+    $DEBUG                = ($arg ? $arg : 1) if $opt eq 'D';
+    $LIST                 = $arg              if $opt eq 'l'; 
     shift;
+}
+
+if ($LIST) {
+    die "Available value for -l is 1 or 2!\n" 
+        if $LIST != 1 && $LIST != 2;
+    print &CreateMenuList($MENU_FILE,$LIST);
+    exit 1;
 }
 
 # Parsing Erpin Arguments
@@ -357,10 +339,10 @@ my @NAME_LIST = split(/,/,$MODELNAME);
 # Validate command-line options #
 #################################
 
-&Usage if @ARGV > 0 || $GENOMEFILE eq "" || $MODELNAME eq "";
+&Usage if @ARGV > 0 || $DATAFILE eq "" || $MODELNAME eq "";
 if (     $ALIGNEDOUTFILE eq "" && $REPORTFILE    eq "" 
       && $XMLOUTFILE     eq "" && $CUSTOMOUTFILE eq ""   ) {
-      $CUSTOMOUTFILE = "$GENOMEFILE.csm";
+      $CUSTOMOUTFILE = "$DATAFILE.csm";
 }
 
 ################
@@ -400,7 +382,12 @@ $MODEL_PATH =~ s/\/$//;
 die "No path for ErpinModels were found\n"
     if !$MODEL_PATH;
     
-checkFile($GENOMEFILE);
+if (defined($POURCENT)) {
+    die 'Value of option -pc must be include between 0 and 100' 
+        if !($POURCENT >= 0 && $POURCENT <= 100);
+}
+    
+checkFile($DATAFILE);
 
 ########
 # MAIN #
@@ -434,8 +421,8 @@ END {
 
 sub CreateNrGenome {
     print STDERR "\nCreating clean copy of genome file...\n";
-    my $nr_genome = "$TMP_DIR/nr_genome.fa";
-    my $Rseqs = &CopyWithoutDuplicates($GENOMEFILE,$nr_genome,"","RemoveDuplicatesByIDs|ReturnHash",50);
+    my $nr_genome = "$TMP_DIR/genome.fa";
+    my $Rseqs = &CopyWithoutDuplicates($DATAFILE,$nr_genome,"","RemoveDuplicatesByIDs|ReturnHash",50);
     return ($nr_genome,$Rseqs);
 }
 
@@ -456,7 +443,7 @@ sub CreateNrModel {
     # Create non-redundant versions of the
     # model file and the genome file.
     my $file_name = basename($model_file);
-    my $nr_model  = "$TMP_DIR/nr_${Item_num}_"."$file_name";
+    my $nr_model  = "$TMP_DIR/$file_name"."${Item_num}";
     return if (-f $nr_model);
     print STDERR "Creating clean copy of model file '$model_file' for Item '$Item_num'...\n";
     my $LinStruct  = PirObject::LinStruct->new();
@@ -565,12 +552,20 @@ sub DumpFormatedSeq {
 sub CreateNrModelAndRunErpin {
     my $AllErpinResult = {};
     
+    my $FileForCut = "";
+    if (defined($POURCENT)) {
+        $FileForCut = "$TMP_DIR/for_cutoff";
+        open(CUTOFF, ">$FileForCut") or die ("Could not open file for cutoff!\n");
+        print CUTOFF ">SeqForCutoff\nT\n";
+        close(CUTOFF);
+    }
+
     foreach my $name (@NAME_LIST) {
         my $model_list = $MENU_LIST->{lc($name)};
         die "No model found for '$name'\n" if !$model_list;
         my $ItemSet   = $model_list->{'ItemSet'};
         print "\nWork on $name\n";
-            
+
         my $Item_count = 1;
         my $erpin_res  = [];
         foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
@@ -578,6 +573,7 @@ sub CreateNrModelAndRunErpin {
             my $modelFile     = $Item->get_modelFile();
             my $erpinArg      = $Item->get_erpinArg();
             my $label         = $Item->get_Label();
+            my $cutoff        = $Item->get_cutoff();
             my @ERPINARGS     = split(/\s+/,$erpinArg);
             my @erpinMaskNums = ParseErpinArgs(@ERPINARGS);
             $Item->set_erpinMaskNums(\@erpinMaskNums);
@@ -592,7 +588,8 @@ sub CreateNrModelAndRunErpin {
             my $erpinOut      = "$erpinSuf.out";
             my $erpinErr      = "$erpinSuf.err";
             # Run Erpin.
-            my $saved_cwd = &RunErpin($nr_genome,$model_file,$erpinArg,$erpinOut,$erpinErr,$name,$Item_num);
+            $cutoff       = &DefineCutoffWithPourcent($model_file,$FileForCut,$erpinArg,$cutoff) if $POURCENT;
+            my $saved_cwd = &RunErpin($nr_genome,$model_file,$erpinArg,$erpinOut,$erpinErr,$Item_num,$cutoff);
             # Create the corresponding full alignment.
             my $erpinResult    = &MakeModel($model_file,$erpinOut,"$erpinSuf.log","$erpinSuf.ali",0,100,$lowest,$erpinMaskNums);
             chdir $saved_cwd if !$erpinResult;
@@ -612,16 +609,65 @@ sub CreateNrModelAndRunErpin {
     return $AllErpinResult;
 }
 
-sub RunErpin {
-    my ($nr_genome,$nr_model,$erpinArg,$erpinOut,$erpinErr,$name,$Item_num) = @_;
+sub DefineCutoffWithPourcent {
+    my ($model_file,$FileForCut,$erpinArg,$cutoff) = @_;
+
+    my ($erpinOut,$erpinErr) = ("$FileForCut.out","$FileForCut.err");
+    my $saved_cwd    = &RunErpin($FileForCut,$model_file,$erpinArg,$erpinOut,$erpinErr);
+    chdir $saved_cwd;
+    my $BestCutoff   = &DefineBestcutoff($erpinOut);
+    my $newCutoff    = " ";
+    my $HaveNegValue = 0;
+    foreach my $b_cutoff (@$BestCutoff) {
+        if ($b_cutoff < 0) {
+            $HaveNegValue = 1;
+            print "Cutoff values defined by erpin contain negative value '$b_cutoff', uses values of user.\n";
+            last;
+        }
+        my $PourcentCutoff = ( $b_cutoff * $POURCENT) / 100;
+        $PourcentCutoff = arrondi($PourcentCutoff,1);
+        $newCutoff .= "$PourcentCutoff ";
+    }
+    $newCutoff = $cutoff if $HaveNegValue;
+    return $newCutoff;
+}
+
+sub arrondi {
+    my ($n,$precision) = @_;    
+    return int((10**$precision)*$n + 0.5) / (10**$precision);
+}
+
+sub DefineBestcutoff {
+    my $OutFile = shift;
+    my $BestCutoff = [];
     
+    my $ifh = new IO::File "<$OutFile";
+    while (my $line = <$ifh>) {
+        next if $line !~ m/^cutoff:\s+(.+)/;
+        push(@$BestCutoff,$1);
+    }
+    return $BestCutoff;
+}
+
+sub RunErpin {
+    my ($nr_genome,$nr_model,$erpinArg,$erpinOut,$erpinErr,$Item_num,$cutoff) = @_;
+    
+    $ENV{"PATH"} .= ":./bin"; # add arbitrarily to make it work in the basic distribution env
     $erpinArg =~ s/"//g;
     my $saved_cwd = getcwd;
     chdir $TMP_DIR or die "Can't chdir to tmp dir '$TMP_DIR': $!\n";
-    print STDERR "Running erpin for item $Item_num...\n";
-    print STDERR "erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
-    $ENV{"PATH"} .= ":./bin"; # add arbitrarily to make it work in the basic distribution env
-    my $ret = system("/bin/sh","-c","erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+    print STDERR "Running erpin for item $Item_num...\n" if $Item_num;
+    
+    my $ret = "";
+    if (defined($cutoff)) {
+        print STDERR "erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
+        $ret = system("/bin/sh","-c","erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+    }
+    else {
+        print STDERR "erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
+        $ret = system("/bin/sh","-c","erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+    }
+    
     if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
         print STDERR "There was an error running 'erpin'.\n";
         print STDERR "Content of STDERR output:\n";
@@ -671,6 +717,7 @@ sub MakeModel {
 	my $ECO_UP        = shift;
     my $lowest        = shift;
     my $erpinMaskNums = shift;
+    my $label         = shift;
     
     my $ErpinResult   = new PirObject::erpinResult();
     my $Alignments    = [];
@@ -734,7 +781,7 @@ sub MakeModel {
 	print OUTMODELLOG "Condensed alignment for $outputModel\n";
 	print OUTMODELLOG "*************************************************\n";
 	print OUTMODELLOG "There are $numModels matches\n";
-    print OUTMODELLOG "Processing label: $LOG_LABEL\n" if defined $LOG_LABEL;
+    print OUTMODELLOG "Processing label: $label\n" if defined $label;
 	print OUTMODELLOG "\n";
     
 	## END : HEADER LOG FILE 
@@ -856,7 +903,7 @@ sub MakeModel {
 			$start + $posAdjustLeft,
             $stop  + $posAdjustRight,
 			$evalue,
-			$GENOMEFILE);
+			$DATAFILE);
 		
 		print OUTMODEL $HeadForAli;
 		
@@ -966,8 +1013,7 @@ sub MakeModel {
     $ErpinResult->set_consensus($consensus);
     $ErpinResult->set_structureLen($structureLen);
     $ErpinResult->set_SequenceLen($lenSeq);
-    $ErpinResult->set_fileName($GENOMEFILE);
-    $ErpinResult->set_fileName($GENOMEFILE);
+    $ErpinResult->set_fileName($DATAFILE);
     $ErpinResult->set_Alignments($Alignments);
     
 	scalar(@$Alignments) == 0 ? "" : return ($ErpinResult);
@@ -1638,7 +1684,7 @@ sub MakeOutput {
 sub CreateRNAPredictions {
     my $AllResult = shift;
     
-    my $filename = basename($GENOMEFILE);
+    my $filename = basename($DATAFILE);
     my $aliFile = "$TMP_DIR/$filename.ali";
     my $logFile = "$TMP_DIR/$filename.log";
     my $csmFile = "$TMP_DIR/$filename.csm";
