@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.10 2009/07/24 21:32:24 nbeck Exp $
+#    $Id: RNAfinder,v 1.11 2009/07/24 22:01:09 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.11  2009/07/24 22:01:09  nbeck
+#    Added parallelization of erpin.
+#
 #    Revision 1.10  2009/07/24 21:32:24  nbeck
 #    Fixed bug with option '-pc'.
 #
@@ -84,7 +87,7 @@ use vars qw( $VERSION $RCS_VERSION );
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.10 2009/07/24 21:32:24 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.11 2009/07/24 22:01:09 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -102,6 +105,8 @@ foreach my $dir (@CFG_PATH) {
 }
 die "The config file '.RNAfinder.cfg' doesn't find. Check your installation for this one.\n"
     if !$DIR_CFG;
+    
+$ENV{"PATH"} .= ":./bin"; # add arbitrarily to make it work in the basic distribution env
 
 # Treatment of config file.
 my $MENUFILE  = "$DIR_CFG/.RNAfinder.cfg";
@@ -188,6 +193,8 @@ Other options:
 
 -d               Turn on debug mode; some temporary files will be left in
                  a subdirectory created in /tmp, available for inspection.
+                 
+-P               Used to define the number of processor, default : 2.
 USAGE
 exit 1;
 }
@@ -276,18 +283,18 @@ if (@ARGV == 0) {
 ##################################
 # Global variables and constants #
 ##################################
-
 $|=1;
 
 # Input options
-my $DATAFILE       = ""; # -d
-my $MODELNAME      = ""; # -m
-my $GENETICCODE    = ""; # -c
+my $DATAFILE    = ""; # -d
+my $MODELNAME   = ""; # -m
+my $GENETICCODE = ""; # -c
 
 # Default parameters for the script
-my $DEBUG          =  0; # -D
-my $LIST           =  0; # -l
-my $TMP_DIR        = "/tmp/RNAfinder.$$";
+my $DEBUG       = 0; # -D
+my $LIST        = 0; # -l
+my $PARALLELISM = 2; # -P   
+my $TMP_DIR     = "/tmp/RNAfinder.$$";
 
 # Output options
 my $ERPINOUTFILE   = ""; # -E
@@ -297,8 +304,8 @@ my $XMLOUTFILE     = ""; # -X
 my $CUSTOMOUTFILE  = ""; # -C
 
 # Other
-my $CODON_TABLE = "";
-my $POURCENT    = 0;
+my $CODON_TABLE   = "";
+my $POURCENT      = 0;
 my $POURCENTISDEF = undef;
 
 ###########################
@@ -324,12 +331,15 @@ for (;@ARGV;) {
     $GENETICCODE          = $arg              if $opt eq 'c';
     $DATAFILE             = $arg              if $opt eq 'd';
     $MODELNAME            = $arg              if $opt eq 'm';
+    $LIST                 = $arg              if $opt eq 'l';
     $ALIGNEDOUTFILE       = $arg              if $opt eq 'A';
     $REPORTFILE           = $arg              if $opt eq 'L';
     $XMLOUTFILE           = $arg              if $opt eq 'X';
     $CUSTOMOUTFILE        = $arg              if $opt eq 'C';
     $DEBUG                = ($arg ? $arg : 1) if $opt eq 'D';
-    $LIST                 = $arg              if $opt eq 'l'; 
+    $PARALLELISM          = $arg              if $opt eq 'P';
+
+ 
     shift;
 }
 
@@ -394,7 +404,6 @@ if (defined($POURCENTISDEF)) {
     die 'Value of option -pc must be include between 0 and 100' 
         if !($POURCENT > 0 && $POURCENT <= 100);
 }
-
 checkFile($DATAFILE);
 
 ########
@@ -407,17 +416,11 @@ my $AllErpinResult      = &CreateNrModelAndRunErpin();
 &SelectResult($AllErpinResult);
 &MakeOutput($AllErpinResult);
 print STDERR "All done.\n";
+print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
+system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
 
 #End of the script
 exit(0);
-
-# Cleanup temp directory when program exits.
-END { 
-    return unless defined($TMP_DIR) and $TMP_DIR =~ m#^/tmp/#;
-
-    print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
-    system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
-}
 
 #############################
 #   S U B R O U T I N E S   #
@@ -453,7 +456,7 @@ sub CreateNrModel {
     my $file_name = basename($model_file);
     my $nr_model  = "$TMP_DIR/$file_name"."${Item_num}";
     return if (-f $nr_model);
-    print STDERR "Creating clean copy of model file '$model_file' for Item '$Item_num'...\n";
+    print STDERR "\tFile '$model_file' for item '$Item_num'...\n";
     my $LinStruct  = PirObject::LinStruct->new();
     my $model_fh   = new IO::File "<$ModelFilePath"
         or die "Cannot read model output '$ModelFilePath': $!\n";
@@ -560,76 +563,81 @@ sub DumpFormatedSeq {
 sub CreateNrModelAndRunErpin {
     my $AllErpinResult = {};
     
-    my $FileForCut = "";
-    if (defined($POURCENT)) {
-        $FileForCut = "$TMP_DIR/for_cutoff";
-        open(CUTOFF, ">$FileForCut") or die ("Could not open file for cutoff!\n");
-        print CUTOFF ">SeqForCutoff\nT\n";
-        close(CUTOFF);
-    }
-
+    my $FileForCut = &CreateFileForCutoff if $POURCENTISDEF;
     foreach my $name (@NAME_LIST) {
         my $model_list = $MENU_LIST->{lc($name)};
         die "No model found for '$name'\n" if !$model_list;
         my $ItemSet   = $model_list->{'ItemSet'};
         print "\nWork on $name\n";
 
-        my $Item_count = 1;
-        my $erpin_res  = [];
-        foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
-            my $Item          = $ItemSet->{$Item_num};
-            my $modelFile     = $Item->get_modelFile();
-            my $erpinArg      = $Item->get_erpinArg();
-            my $label         = $Item->get_Label();
-            my $cutoff        = $Item->get_cutoff();
-            my @ERPINARGS     = split(/\s+/,$erpinArg);
-            my @erpinMaskNums = ParseErpinArgs(@ERPINARGS);
-            $Item->set_erpinMaskNums(\@erpinMaskNums);
-            $Item->set_lowest($erpinMaskNums[0]);
-            my $erpinMaskNums = $Item->get_erpinMaskNums();
-            my $lowest        = $Item->get_lowest();
-            # Create non-redundant model.
-            my $model_file    = &CreateNrModel($modelFile,\@erpinMaskNums,$Item_num,\@MOD_PATH);
-            my $Ac_id         = $Item->get_AcId();
-            my $modTab        = $Item->get_modTab();
-            my $erpinSuf      = "${name}_$Item_count";
-            my $erpinOut      = "$erpinSuf.out";
-            my $erpinErr      = "$erpinSuf.err";
-            # Run Erpin.
-            $cutoff       = &DefineCutoffWithPourcent($model_file,$FileForCut,$erpinArg,$cutoff) if $POURCENT;
-            my $saved_cwd = &RunErpin($nr_genome,$model_file,$erpinArg,$erpinOut,$erpinErr,$Item_num,$cutoff);
-            # Create the corresponding full alignment.
-            my $erpinResult    = &MakeModel($model_file,$erpinOut,"$erpinSuf.log","$erpinSuf.ali",0,100,$lowest,$erpinMaskNums);
-            chdir $saved_cwd if !$erpinResult;
-            $Item->set_ModelFile($model_file);
-            next if !$erpinResult;
-            $erpinResult->set_modTab($modTab);
-            $erpinResult->set_NumItem($Item_num);
-            $erpinResult->set_Label($label);
-            &DefineCodonTable($GENETICCODE) if $Ac_id && !$CODON_TABLE;
-            &AddAcInfo("$erpinSuf.ali",$Ac_id,$erpinResult) if $Ac_id;
-            push(@$erpin_res,$erpinResult);
-            $Item_count++;
-            chdir $saved_cwd;
-        }
+        &CreateNrModelForAllItems($ItemSet,$name);
+        &DefineCutoffForAllItems($ItemSet,$FileForCut) if $POURCENTISDEF;
+        &RunErpinForAllItems($ItemSet);
+        my $erpin_res = &CreateErpinResultForAllItems($ItemSet);
         $AllErpinResult->{"${name}"} = $erpin_res;
     }
     return $AllErpinResult;
+}
+
+sub CreateNrModelForAllItems {
+    my ($ItemSet,$name) = @_;
+
+    print "Creating clean copy of :\n";
+    foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
+            my $Item          = $ItemSet->{$Item_num};
+            my $erpinArg      = $Item->get_erpinArg();
+            my $modelFile     = $Item->get_modelFile();
+            my @ERPINARGS     = split(/\s+/,$erpinArg);
+            my @erpinMaskNums = ParseErpinArgs(@ERPINARGS);
+            my $model_file    = &CreateNrModel($modelFile,\@erpinMaskNums,$Item_num,\@MOD_PATH);
+            $Item->set_ModelFile($model_file);
+            my $erpinSuf      = "${TMP_DIR}/${name}_$Item_num";
+            my $erpinOut      = "$erpinSuf.out";
+            my $erpinErr      = "$erpinSuf.err";
+            $Item->set_erpinOut($erpinOut);
+            $Item->set_erpinErr($erpinErr);
+            $Item->set_erpinMaskNums(\@erpinMaskNums);
+            $Item->set_lowest($erpinMaskNums[0]);
+        }
+
+}
+
+sub DefineCutoffForAllItems {
+    my ($ItemSet,$FileForCut) = @_;
+    
+    print "Define erpin cutoff :\n";
+    foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
+        print "\tFor item '$Item_num'\n";
+        next if !$POURCENT;
+        my $Item       = $ItemSet->{$Item_num};
+        my $model_file = $Item->get_ModelFile();
+        my $erpinArg   = $Item->get_erpinArg();
+        my $cutoff     = $Item->get_cutoff();
+        $cutoff        = &DefineCutoffWithPourcent($model_file,$FileForCut,$erpinArg,$cutoff);
+        $Item->set_cutoff($cutoff);
+    }
+}
+
+sub CreateFileForCutoff {
+    my $FileForCut = "$TMP_DIR/for_cutoff";
+    open(CUTOFF, ">$FileForCut") or die ("Could not open file for cutoff!\n");
+    print CUTOFF ">SeqForCutoff\nT\n";
+    close(CUTOFF);
+    return $FileForCut;
 }
 
 sub DefineCutoffWithPourcent {
     my ($model_file,$FileForCut,$erpinArg,$cutoff) = @_;
 
     my ($erpinOut,$erpinErr) = ("$FileForCut.out","$FileForCut.err");
-    my $saved_cwd    = &RunErpin($FileForCut,$model_file,$erpinArg,$erpinOut,$erpinErr);
-    chdir $saved_cwd;
+    &RunErpin($FileForCut,$model_file,$erpinArg,$erpinOut,$erpinErr);
     my $BestCutoff   = &DefineBestcutoff($erpinOut);
     my $newCutoff    = " ";
     my $HaveNegValue = 0;
     foreach my $b_cutoff (@$BestCutoff) {
         if ($b_cutoff < 0) {
             $HaveNegValue = 1;
-            print "Cutoff values defined by erpin contain negative value '$b_cutoff', uses values of user.\n";
+            print "\tCutoff defined by erpin contain negative value '$b_cutoff', using cutoff of user.\n";
             last;
         }
         my $PourcentCutoff = ( $b_cutoff * $POURCENT) / 100;
@@ -657,23 +665,113 @@ sub DefineBestcutoff {
     return $BestCutoff;
 }
 
+sub RunErpinForAllItems {
+    my ($ItemSet) = @_;
+    
+    my @Items_todo = sort { $a <=> $b } keys %$ItemSet;
+    my $totalstart = time;
+    my %pidsItems=();
+    my %Itemstarttime=();
+    print "Run erpin :\n";
+    for (;;) {
+        my $ongoing = scalar(keys %pidsItems);
+        last if !@Items_todo && !$ongoing;
+        
+        if ($ongoing >= $PARALLELISM || !@Items_todo) {
+            my $donepid = wait;
+            next if $donepid < 0; # should never happen?
+            my $Item_num = delete($pidsItems{$donepid}) || next;
+            my $start = $Itemstarttime{$Item_num};
+            print "\tProcessing of item '$Item_num' completed in ",(time-$start)," seconds.\n";
+            next;
+        }
+        my $Item_num = shift(@Items_todo);
+        
+        # Manage child subprocesses.
+        if (my $pid = fork()) {
+            $pidsItems{$pid}=$Item_num;
+            $Itemstarttime{$Item_num}=time;
+            print "\tStarting processing of item '$Item_num'\n";
+            next;
+        }
+        
+        # Child starts here
+        my $Item     = $ItemSet->{$Item_num};
+        my $nr_model = $Item->get_ModelFile();
+        my $erpinArg = $Item->get_erpinArg();
+        my $cutoff   = $Item->get_cutoff();
+        my $erpinOut = $Item->get_erpinOut();
+        my $erpinErr = $Item->get_erpinErr();
+        
+        $erpinArg =~ s/"//g;        
+        my $ret = "";
+        if (defined($cutoff)) {
+            print STDERR "erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
+            $ret = system("erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+        }
+        else {
+            print STDERR "erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
+            $ret = system("erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+        }
+        
+        if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
+            print STDERR "There was an error running 'erpin'.\n";
+            print STDERR "Content of STDERR output:\n";
+            system("cat",$erpinErr);
+        }
+        exit 0;
+    }
+}
+
+sub CreateErpinResultForAllItems {
+    my ($ItemSet) = @_;
+    
+    my $erpin_res  = [];
+    foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
+        my $Item          = $ItemSet->{$Item_num};
+        my $model_file    = $Item->get_ModelFile();
+        my $erpinArg      = $Item->get_erpinArg();
+        my $erpinMaskNums = $Item->get_erpinMaskNums();
+        my $lowest        = $Item->get_lowest();
+        my $erpinOut      = $Item->get_erpinOut();
+        my $erpinSuff     = $erpinOut;
+           $erpinSuff     =~ s/.out$//;
+        my $erpinLog      = "$erpinSuff.log";
+        my $erpinAli      = "$erpinSuff.ali";
+        
+        my $erpinResult   = &MakeModel($model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums);
+        next if !$erpinResult;
+        
+        # Add info foreach erpinResult
+        my $modTab        = $Item->get_modTab();
+        $erpinResult->set_modTab($modTab);
+        $erpinResult->set_NumItem($Item_num);
+        my $label         = $Item->get_Label();
+        $erpinResult->set_Label($label);
+        
+        # Add anticodon information
+        my $Ac_id         = $Item->get_AcId();
+        &DefineCodonTable($GENETICCODE) if $Ac_id && !$CODON_TABLE;
+        &AddAcInfo($erpinAli,$Ac_id,$erpinResult) if $Ac_id;
+        push(@$erpin_res,$erpinResult);
+    }
+    return $erpin_res;
+}
+
 sub RunErpin {
     my ($nr_genome,$nr_model,$erpinArg,$erpinOut,$erpinErr,$Item_num,$cutoff) = @_;
     
-    $ENV{"PATH"} .= ":./bin"; # add arbitrarily to make it work in the basic distribution env
     $erpinArg =~ s/"//g;
-    my $saved_cwd = getcwd;
-    chdir $TMP_DIR or die "Can't chdir to tmp dir '$TMP_DIR': $!\n";
     print STDERR "Running erpin for item $Item_num...\n" if $Item_num;
     
     my $ret = "";
     if (defined($cutoff)) {
         print STDERR "erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
-        $ret = system("/bin/sh","-c","erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+        $ret = system("erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
     }
     else {
         print STDERR "erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
-        $ret = system("/bin/sh","-c","erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+        $ret = system("erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
     }
     
     if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
@@ -682,7 +780,6 @@ sub RunErpin {
         system("cat",$erpinErr);
         exit 0; # cleanup will occur in END {}
     }
-    return $saved_cwd;
 }
 
 sub ParseErpinArgs {
@@ -776,7 +873,7 @@ sub MakeModel {
     my $outputModel   = "$alignedfile";
 	my $modelLogFile  = "$reportfile";
 	open(OUTMODELLOG, ">$modelLogFile") or die "Could not open training set logfile\n";
-	open(OUTMODEL, ">$TMP_DIR/$outputModel") or die "Could not open new training set file\n";
+	open(OUTMODEL, ">$outputModel") or die "Could not open new training set file\n";
 	
 	#Print structure in the training set
 	print OUTMODEL ">structure\n";
@@ -1406,8 +1503,8 @@ sub AddAcInfo {
     my ($AliFile,$ac_ID,$erpinResult) = @_;
     
     my $linstruct  = PirObject::LinStruct->new();
-    my $align_fh   = new IO::File "<$TMP_DIR/$AliFile"
-        or die "Cannot reread aligned output '$TMP_DIR/$AliFile': $!\n";
+    my $align_fh   = new IO::File "<$AliFile"
+        or die "Cannot reread aligned output '$AliFile': $!\n";
     $linstruct->ImportFromMultipleAlignment($align_fh); # will close the filehandle
     
     my $length_ali  = $linstruct->get_structlength(); # full width, including gaps
