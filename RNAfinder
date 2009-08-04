@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.11 2009/07/24 22:01:09 nbeck Exp $
+#    $Id: RNAfinder,v 1.12 2009/08/04 18:27:35 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.12  2009/08/04 18:27:35  nbeck
+#    Added search of the number of processor.
+#
 #    Revision 1.11  2009/07/24 22:01:09  nbeck
 #    Added parallelization of erpin.
 #
@@ -82,18 +85,19 @@ use File::Basename;
 use Cwd;
 use Bio::Tools::CodonTable;
 use vars qw( $VERSION $RCS_VERSION );
+use lib    ( "./lib" );
 
 # Default umask
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.11 2009/07/24 22:01:09 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.12 2009/08/04 18:27:35 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
 # File with Menu
 # Define Path for .cfg
-my @CFG_PATH      = (".", ($ENV{"HOME"} || ".")); # You can add other search directories here
+my @CFG_PATH      = (($ENV{"HOME"} || ".")); # You can add other search directories here
 push(@CFG_PATH,split(/:/,$ENV{"RNAFINDER_CFG_PATH"}))
     if $ENV{"RNAFINDER_CFG_PATH"};
 
@@ -114,7 +118,7 @@ my $MENU_FILE = PirObject::RNAfinderFileForMenu->ImportFromTextFile($MENUFILE);
 my $MENU_LIST = $MENU_FILE->get_MenuList();
 &CheckModuleList();
 
-print "This is $BASENAME version $VERSION.\n";
+print "This is $BASENAME version $VERSION by Natacha Beck.\n";
 
 #########
 # Usage #
@@ -194,7 +198,8 @@ Other options:
 -d               Turn on debug mode; some temporary files will be left in
                  a subdirectory created in /tmp, available for inspection.
                  
--P               Used to define the number of processor, default : 2.
+-P               Used to define the number of processor.
+                 Default RNAfinder look at the number of processor.
 USAGE
 exit 1;
 }
@@ -293,7 +298,7 @@ my $GENETICCODE = ""; # -c
 # Default parameters for the script
 my $DEBUG       = 0; # -D
 my $LIST        = 0; # -l
-my $PARALLELISM = 2; # -P   
+my $PARALLELISM = 0; # -P
 my $TMP_DIR     = "/tmp/RNAfinder.$$";
 
 # Output options
@@ -326,20 +331,18 @@ for (;@ARGV;) {
         shift;
         $arg=$ARGV[0];
     }
-    $POURCENT             = $arg              if $opt eq 'pc';
-    $POURCENTISDEF        = 1                 if $opt eq 'pc';
-    $GENETICCODE          = $arg              if $opt eq 'c';
-    $DATAFILE             = $arg              if $opt eq 'd';
-    $MODELNAME            = $arg              if $opt eq 'm';
-    $LIST                 = $arg              if $opt eq 'l';
-    $ALIGNEDOUTFILE       = $arg              if $opt eq 'A';
-    $REPORTFILE           = $arg              if $opt eq 'L';
-    $XMLOUTFILE           = $arg              if $opt eq 'X';
-    $CUSTOMOUTFILE        = $arg              if $opt eq 'C';
-    $DEBUG                = ($arg ? $arg : 1) if $opt eq 'D';
-    $PARALLELISM          = $arg              if $opt eq 'P';
-
- 
+    $POURCENT       = $arg              if $opt eq 'pc';
+    $POURCENTISDEF  = 1                 if $opt eq 'pc';
+    $GENETICCODE    = $arg              if $opt eq 'c';
+    $DATAFILE       = $arg              if $opt eq 'd';
+    $MODELNAME      = $arg              if $opt eq 'm';
+    $LIST           = $arg              if $opt eq 'l';
+    $ALIGNEDOUTFILE = $arg              if $opt eq 'A';
+    $REPORTFILE     = $arg              if $opt eq 'L';
+    $XMLOUTFILE     = $arg              if $opt eq 'X';
+    $CUSTOMOUTFILE  = $arg              if $opt eq 'C';
+    $DEBUG          = ($arg ? $arg : 1) if $opt eq 'D';
+    $PARALLELISM    = $arg              if $opt eq 'P';
     shift;
 }
 
@@ -411,8 +414,9 @@ checkFile($DATAFILE);
 ########
 
 # Create non-redundant versions of the genome file.
-my ($nr_genome,$Rseqs)  = &CreateNrGenome();
-my $AllErpinResult      = &CreateNrModelAndRunErpin();
+$PARALLELISM           = &DefineNumberOfProcessor() if  !$PARALLELISM;
+my ($nr_genome,$Rseqs) = &CreateNrGenome();
+my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &SelectResult($AllErpinResult);
 &MakeOutput($AllErpinResult);
 print STDERR "All done.\n";
@@ -429,6 +433,19 @@ exit(0);
 ###############################
 # Creation of temporary files #
 ###############################
+
+sub DefineNumberOfProcessor {
+    my $nb_proc = "$TMP_DIR/nb_proc";
+    system("grep processor /proc/cpuinfo > $nb_proc");
+    my $count_proc = 0;
+    my $infh = new IO::File "<$nb_proc"
+        or die "Can't read from file '$nb_proc': $!\n";
+    while (my $line = <$infh>) {
+        next if $line !~ m/^processor\s*:\s*\d+$/;
+        $count_proc++;
+    }
+    return $count_proc;
+}
 
 sub CreateNrGenome {
     print STDERR "\nCreating clean copy of genome file...\n";
