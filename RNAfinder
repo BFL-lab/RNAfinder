@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.12 2009/08/04 18:27:35 nbeck Exp $
+#    $Id: RNAfinder,v 1.13 2009/08/04 18:56:20 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.13  2009/08/04 18:56:20  nbeck
+#    Added verification for option -P.
+#
 #    Revision 1.12  2009/08/04 18:27:35  nbeck
 #    Added search of the number of processor.
 #
@@ -91,7 +94,7 @@ use lib    ( "./lib" );
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.12 2009/08/04 18:27:35 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.13 2009/08/04 18:56:20 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -414,7 +417,12 @@ checkFile($DATAFILE);
 ########
 
 # Create non-redundant versions of the genome file.
-$PARALLELISM           = &DefineNumberOfProcessor() if  !$PARALLELISM;
+my $NB_PROC            = &DefineNumberOfProcessor();
+$PARALLELISM           = $NB_PROC if !$PARALLELISM;
+if ($PARALLELISM > $NB_PROC) {
+   print "This computer hav only $NB_PROC processor, used all processor\n";
+   $PARALLELISM = $NB_PROC;
+}
 my ($nr_genome,$Rseqs) = &CreateNrGenome();
 my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &SelectResult($AllErpinResult);
