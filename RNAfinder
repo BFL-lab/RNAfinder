@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.13 2009/08/04 18:56:20 nbeck Exp $
+#    $Id: RNAfinder,v 1.14 2009/08/06 21:03:05 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.14  2009/08/06 21:03:05  nbeck
+#    Fixed conflicts in RNAfinderFileForMenu.pir MenuList.pir
+#
 #    Revision 1.13  2009/08/04 18:56:20  nbeck
 #    Added verification for option -P.
 #
@@ -94,7 +97,7 @@ use lib    ( "./lib" );
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.13 2009/08/04 18:56:20 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.14 2009/08/06 21:03:05 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -118,7 +121,7 @@ $ENV{"PATH"} .= ":./bin"; # add arbitrarily to make it work in the basic distrib
 # Treatment of config file.
 my $MENUFILE  = "$DIR_CFG/.RNAfinder.cfg";
 my $MENU_FILE = PirObject::RNAfinderFileForMenu->ImportFromTextFile($MENUFILE);
-my $MENU_LIST = $MENU_FILE->get_MenuList();
+my $MENU_LIST = $MENU_FILE->get_List();
 &CheckModuleList();
 
 print "This is $BASENAME version $VERSION by Natacha Beck.\n";
@@ -203,6 +206,8 @@ Other options:
                  
 -P               Used to define the number of processor.
                  Default RNAfinder look at the number of processor.
+
+-pc              Percentage of cutoff values defined by erpin.
 USAGE
 exit 1;
 }
@@ -218,7 +223,7 @@ sub CreateMenuList {
         my $ModComment = $ItemSet->{'Comment'};
         $Menu .= "\nModel name : $OriName\n";
         $Menu .= "Comment    : $ModComment\n";
-           $ItemSet = $ItemSet->{'ItemSet'};
+           $ItemSet = $ItemSet->{'Set'};
         my $Item_count = 1;
         foreach my $Item_num ( keys %$ItemSet){
             my $Item = $ItemSet->{$Item_num};
@@ -252,7 +257,7 @@ sub CheckModuleList {
 
     # Make verification must have complete list
     for my $ItemSet_name ( sort keys %$menulist ) {
-        my $ItemSet   = $menulist->{$ItemSet_name}->{'ItemSet'};
+        my $ItemSet   = $menulist->{$ItemSet_name}->{'Set'};
         # If one Item have module all Item for one model must have module
         my $count_module = 0;
         my $count_Item   = scalar( keys %$ItemSet);
@@ -592,7 +597,7 @@ sub CreateNrModelAndRunErpin {
     foreach my $name (@NAME_LIST) {
         my $model_list = $MENU_LIST->{lc($name)};
         die "No model found for '$name'\n" if !$model_list;
-        my $ItemSet   = $model_list->{'ItemSet'};
+        my $ItemSet   = $model_list->{'Set'};
         print "\nWork on $name\n";
 
         &CreateNrModelForAllItems($ItemSet,$name);

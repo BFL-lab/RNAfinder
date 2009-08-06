@@ -19,9 +19,12 @@
 #       pos_ac = "13"
 # Between "Item" and "EndItem" if the anticodon is the 13 element of the model.
 #
-# $Id: RNAfinderFileForMenu.pir,v 1.2 2009/07/23 19:36:00 nbeck Exp $
+# $Id: RNAfinderFileForMenu.pir,v 1.3 2009/08/06 21:03:05 nbeck Exp $
 #
 # $Log: RNAfinderFileForMenu.pir,v $
+# Revision 1.3  2009/08/06 21:03:05  nbeck
+# Fixed conflicts in RNAfinderFileForMenu.pir MenuList.pir
+#
 # Revision 1.2  2009/07/23 19:36:00  nbeck
 # Added -c Option, and change Usage.
 #
@@ -37,12 +40,12 @@
 # Field name    		Sing/Array/Hash	Type		    Comments
 #---------------------- ---------------	---------------	-----------------------
 filename                single          string          optional
-MenuList           	    array	        <MenuList>      Menu list
+List           	        array	        <MenuList>      Menu list
 
 - EndFieldsTable
 - Methods
 
-our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.2 2009/07/23 19:36:00 nbeck Exp $';
+our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.3 2009/08/06 21:03:05 nbeck Exp $';
 our ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 
 # Sample format of text file
@@ -99,12 +102,12 @@ sub ImportFromTextFile {
 
         
         my $List = new PirObject::MenuList(
-            ItemSet => {},
+            Set     => {},
             OriName => $name,
             Comment => $ModelComment
         );
         
-        my $ItemSet = $List->get_ItemSet();
+        my $ItemSet = $List->get_Set();
         my $Item_counter = 0;
         while (@file) {
             while (@file && $file[0] =~ m/^\s*$|^\s*#/){
@@ -155,6 +158,6 @@ sub ImportFromTextFile {
         }
         $MenuList->{lc($name)} = $List;
     }
-    $self->set_MenuList($MenuList);
+    $self->set_List($MenuList);
     $self;
 }
