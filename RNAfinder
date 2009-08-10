@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.14 2009/08/06 21:03:05 nbeck Exp $
+#    $Id: RNAfinder,v 1.15 2009/08/10 20:36:57 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.15  2009/08/10 20:36:57  nbeck
+#    Changed some messages and fixed bug with low evalue 00e+00.
+#
 #    Revision 1.14  2009/08/06 21:03:05  nbeck
 #    Fixed conflicts in RNAfinderFileForMenu.pir MenuList.pir
 #
@@ -92,12 +95,13 @@ use Cwd;
 use Bio::Tools::CodonTable;
 use vars qw( $VERSION $RCS_VERSION );
 use lib    ( "./lib" );
+use POSIX qw{strftime};
 
 # Default umask
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.14 2009/08/06 21:03:05 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.15 2009/08/10 20:36:57 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -486,7 +490,6 @@ sub CreateNrModel {
     my $file_name = basename($model_file);
     my $nr_model  = "$TMP_DIR/$file_name"."${Item_num}";
     return if (-f $nr_model);
-    print STDERR "\tFile '$model_file' for item '$Item_num'...\n";
     my $LinStruct  = PirObject::LinStruct->new();
     my $model_fh   = new IO::File "<$ModelFilePath"
         or die "Cannot read model output '$ModelFilePath': $!\n";
@@ -612,7 +615,7 @@ sub CreateNrModelAndRunErpin {
 sub CreateNrModelForAllItems {
     my ($ItemSet,$name) = @_;
 
-    print "Creating clean copy of :\n";
+    print "Creating clean copy of models.\n";
     foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
             my $Item          = $ItemSet->{$Item_num};
             my $erpinArg      = $Item->get_erpinArg();
@@ -712,7 +715,8 @@ sub RunErpinForAllItems {
             next if $donepid < 0; # should never happen?
             my $Item_num = delete($pidsItems{$donepid}) || next;
             my $start = $Itemstarttime{$Item_num};
-            print "\tProcessing of item '$Item_num' completed in ",(time-$start)," seconds.\n";
+            print "\tProcessing of item '$Item_num' completed in ";
+            print strftime("\%H:\%M:\%S", gmtime(time-$start))."\n";
             next;
         }
         my $Item_num = shift(@Items_todo);
@@ -915,8 +919,8 @@ sub MakeModel {
 	print OUTMODELLOG "*************************************************\n";
 	print OUTMODELLOG "Condensed alignment for $outputModel\n";
 	print OUTMODELLOG "*************************************************\n";
-	print OUTMODELLOG "There are $numModels matches\n";
-    print OUTMODELLOG "Processing label: $label\n" if defined $label;
+	print OUTMODELLOG "$numModels matches\n";
+    print OUTMODELLOG "Label: $label\n" if defined $label;
 	print OUTMODELLOG "\n";
     
 	## END : HEADER LOG FILE 
@@ -1644,6 +1648,8 @@ sub RemoveAlignment {
                     my $isOv = &OverlappingRegions($seqLen,$start_i,$stop_i,">",$start_j,$stop_j,">");
                     next if !$isOv;
                     if ($iIsj == 1) {
+                        $evalue_i = "1e-100" if $evalue_i =~ m/^([\+\-]?)([\d\.]*)(?:e([\+\-]?00))?$/x;
+                        $evalue_j = "1e-100" if $evalue_j =~ m/^([\+\-]?)([\d\.]*)(?:e([\+\-]?00))?$/x;
                         my $iHaveBetterEvalue =  &CompareHighPrecisionFloats($evalue_i,$evalue_j) == -1  ? 1 : 0;
                         # Keep result with better evalue
                         splice(@$ali_block_i, $i_ali, 1) if $iHaveBetterEvalue == 0; # splice i
@@ -1754,14 +1760,14 @@ sub CompareHighPrecisionFloats {
     die "Unparsable number '$x'\n"
         unless $x =~ m/^([\+\-]?)             # sign
                         ([\d\.]*)             # significand
-                        (?:e(-?\d*))?         # exponent
+                        (?:e([\+\-]?\d*))?         # exponent
                        $/x;
     my ($xsig,$xman,$xexp) = ($1,$2,$3);
 
     die "Unparsable number '$y'\n"
         unless $y =~ m/^([\+\-]?)             # sign
                         ([\d\.]*)             # significand
-                        (?:e(-?\d*))?         # exponent
+                        (?:e([\+\-]?\d*))?         # exponent
                        $/x;
     my ($ysig,$yman,$yexp) = ($1,$2,$3);
 
