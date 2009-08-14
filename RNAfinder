@@ -29,9 +29,13 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.15 2009/08/10 20:36:57 nbeck Exp $
+#    $Id: RNAfinder,v 1.16 2009/08/14 18:50:29 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.16  2009/08/14 18:50:29  nbeck
+#    Fixed bug with contig, cleaned data file (-d).
+#    Changed nice of erpin and screen output.
+#
 #    Revision 1.15  2009/08/10 20:36:57  nbeck
 #    Changed some messages and fixed bug with low evalue 00e+00.
 #
@@ -101,13 +105,13 @@ use POSIX qw{strftime};
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.15 2009/08/10 20:36:57 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.16 2009/08/14 18:50:29 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
 # File with Menu
 # Define Path for .cfg
-my @CFG_PATH      = (($ENV{"HOME"} || ".")); # You can add other search directories here
+my @CFG_PATH      = (".",($ENV{"HOME"} || ".")); # You can add other search directories here
 push(@CFG_PATH,split(/:/,$ENV{"RNAFINDER_CFG_PATH"}))
     if $ENV{"RNAFINDER_CFG_PATH"};
 
@@ -126,9 +130,10 @@ $ENV{"PATH"} .= ":./bin"; # add arbitrarily to make it work in the basic distrib
 my $MENUFILE  = "$DIR_CFG/.RNAfinder.cfg";
 my $MENU_FILE = PirObject::RNAfinderFileForMenu->ImportFromTextFile($MENUFILE);
 my $MENU_LIST = $MENU_FILE->get_List();
+my $LIST_OF_SEARCHED = "";
 &CheckModuleList();
 
-print "This is $BASENAME version $VERSION by Natacha Beck.\n";
+print "$BASENAME (version $VERSION) by Natacha Beck.\n";
 
 #########
 # Usage #
@@ -229,7 +234,7 @@ sub CreateMenuList {
         $Menu .= "Comment    : $ModComment\n";
            $ItemSet = $ItemSet->{'Set'};
         my $Item_count = 1;
-        foreach my $Item_num ( keys %$ItemSet){
+        foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet){
             my $Item = $ItemSet->{$Item_num};
             my $erpinArg  = $Item->get_erpinArg()   || "";
             my $modelFile = $Item->get_modelFile()  || "";
@@ -239,7 +244,7 @@ sub CreateMenuList {
             my $cutoff    = $Item->get_cutoff()     || "";
             
             if ($lvl == 2 ) {
-                $Menu .= "\tItem$Item_count\n";
+                $Menu .= "\tItem$Item_num\n";
                 $Menu .= "\t\terpin arguments    : $erpinArg\n"  if $erpinArg;
                 $Menu .= "\t\tModel file         : $modelFile\n" if $modelFile;
                 $Menu .= "\t\tCutoff             : $cutoff\n"    if $cutoff;
@@ -248,7 +253,7 @@ sub CreateMenuList {
                 $Menu .= "\t\tComment            : $comment\n"   if $comment && $comment ne '""';
             }
             else {
-                $Menu .= "\tItem$Item_count : $comment\n";
+                $Menu .= "\tItem$Item_num : $comment\n";
             }
             $Item_count++;
         }
@@ -319,11 +324,13 @@ my $ALIGNEDOUTFILE = ""; # -A
 my $REPORTFILE     = ""; # -L
 my $XMLOUTFILE     = ""; # -X
 my $CUSTOMOUTFILE  = ""; # -C
+my $CSMOUTFILE_NOTDEF = 0;
 
 # Other
 my $CODON_TABLE   = "";
 my $POURCENT      = 0;
 my $POURCENTISDEF = undef;
+my $TOTALSTART = time;
 
 ###########################
 # Deal with the arguments #
@@ -375,7 +382,7 @@ my @NAME_LIST = split(/,/,$MODELNAME);
 &Usage if @ARGV > 0 || $DATAFILE eq "" || $MODELNAME eq "";
 if (     $ALIGNEDOUTFILE eq "" && $REPORTFILE    eq "" 
       && $XMLOUTFILE     eq "" && $CUSTOMOUTFILE eq ""   ) {
-      $CUSTOMOUTFILE = "$DATAFILE.csm";
+      $CSMOUTFILE_NOTDEF = 1;
 }
 
 ################
@@ -436,11 +443,12 @@ my ($nr_genome,$Rseqs) = &CreateNrGenome();
 my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &SelectResult($AllErpinResult);
 &MakeOutput($AllErpinResult);
-print STDERR "All done.\n";
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
 
 #End of the script
+printf("%-50s", "Finished");
+print strftime("\%H:\%M:\%S", gmtime(time-$TOTALSTART))."\n";
 exit(0);
 
 #############################
@@ -465,7 +473,6 @@ sub DefineNumberOfProcessor {
 }
 
 sub CreateNrGenome {
-    print STDERR "\nCreating clean copy of genome file...\n";
     my $nr_genome = "$TMP_DIR/genome.fa";
     my $Rseqs = &CopyWithoutDuplicates($DATAFILE,$nr_genome,"","RemoveDuplicatesByIDs|ReturnHash",50);
     return ($nr_genome,$Rseqs);
@@ -498,6 +505,7 @@ sub CreateNrModel {
     return ($nr_model);
 }
 
+
 # Yet another FASTA parser/loader/validator/copier.
 sub CopyWithoutDuplicates {
     my $infile        = shift;
@@ -512,7 +520,9 @@ sub CopyWithoutDuplicates {
         or die "Can't read from file '$infile': $!\n";
     my $outfh = new IO::File ">$outfile"
         or die "Can't write to file '$outfile': $!\n";
-
+    my $cleanfh = new IO::File ">${outfile}.RemoveSeqName"
+        or die "Can't write to file '${outfile}.RemoveSeqName': $!\n";
+    
     # Option parsing
     my $byseq      = 1 if $options =~ /byseq/i;  # byids is converse of this
     my $rawseq     = 1 if $options =~ /rawseq/i;
@@ -520,11 +530,15 @@ sub CopyWithoutDuplicates {
 
     my %seenIds  = (); # FASTA IDs (for uniqueness)
     my %seenSeqs = (); # SEQ DATA (for uniqueness)
+    my %list_seq = (); # SEQ DATA (for uniqueness) not Interest_seq
+    my %head_dup = (); # DUPLICATE FASTA IDs with =! sequence
+    my %ID_seq   = (); # FASTA IDs (for uniqueness) value = sequence
 
     my $header        = "";
     my $id            = "";
     my $seq           = "";
     my $Interest_seq  = "";
+    
 
     my %IdToSeq = (); # all seq data in a hash; returned if option ReturnHash is true
 
@@ -532,7 +546,7 @@ sub CopyWithoutDuplicates {
         next if $line =~ m#^\s*$|^;#;
 
         # Seq data? Append.
-        if ($line !~ m/^>\s*(\S+)/) {
+        if ($line !~ m/^>\s*(.+)/) {
             $line     =~ tr/a-z\-\*A-Z//cd unless $rawseq;
             $Interest_seq = &CreateSeq($LinStruct,$line,$erpinMaskNums) if $nr_model && ($nr_model eq $outfile); 
             $seq     .= $line;
@@ -542,34 +556,67 @@ sub CopyWithoutDuplicates {
         # Header line.
         my $newid = $1; # from regex above
 
-        # Dump previous record if needed
-        my $isdupl = $byseq ? $seenSeqs{$Interest_seq} : $seenIds{$id};
+        # # Dump previous record if needed
+        my $isdupl = 0;
+        if (defined($byseq)) {
+            $isdupl = $seenSeqs{$Interest_seq};
+        }
+        else {
+            $isdupl = 1 if $ID_seq{$id} && $ID_seq{$id} eq $seq;
+            $isdupl = 1 if $list_seq{$seq};
+            ++$head_dup{$id} if $ID_seq{$id} && $ID_seq{$id} ne $seq;
+        }
+        
         if ($isdupl) {
-            print STDERR "Ignored duplicated entry in '$infile': $id\n" if $DEBUG && $isdupl == 1;
+            print STDERR "Ignored duplicated entry in '$infile': $id\n"   if $DEBUG  && $isdupl == 1;
+            print $cleanfh "$id\n" if $isdupl == 1;
         } elsif ($id) { # if we have the previous seq in memory
-            print $outfh ">$id\n"; # cleaned header with simple ID
-            print $outfh $seq                       if     $rawseq;
-            &DumpFormatedSeq($outfh,\ $seq, $width) unless $rawseq;
-            $IdToSeq{$id}=$seq if $returnhash;
+            my $name_for_IdToSeq = !$head_dup{$id} ? $id : "$id ".$head_dup{$id};
+            print $outfh ">$name_for_IdToSeq\n"; # cleaned header with simple ID
+            print $outfh $seq                        if     $rawseq;
+            &DumpFormatedSeq($outfh,\ $seq, $width)  unless $rawseq;
+            $IdToSeq{$name_for_IdToSeq}=$seq if $returnhash;
             $byseq ? ++$seenSeqs{$Interest_seq} : ++$seenIds{$id};
+            $ID_seq{$id} = $seq if !$byseq;
+            ++$list_seq{$seq};
         }
         ($header,$id,$seq)  = ($line,$newid,"");
     }
 
     # Handle last seq in file
-    my $isdupl = $byseq ? exists($seenSeqs{$seq}) : exists($seenIds{$id});
+    my $isdupl = 0;
+    if (defined($byseq)) {
+        $isdupl = exists($seenSeqs{$seq});
+    }
+    else {
+        $isdupl = 1 if $ID_seq{$id} && $ID_seq{$id} eq $seq;
+        $isdupl = 1 if $list_seq{$seq};
+        ++$head_dup{$id} if $ID_seq{$id} && $ID_seq{$id} ne $seq;
+    }
+    
     if ($isdupl) {
-        print STDERR "Ignored duplicated entry in '$infile': $id\n" if $DEBUG && $seenIds{$id} == 2;
+        print STDERR   "Ignored duplicated entry in '$infile': $id\n" if $DEBUG && $seenIds{$id} == 2;
+        print $cleanfh "$id\n" if $seenIds{$id} == 2;
     } elsif ($id) { # if we have the previous seq in memory
-        print $outfh ">$id\n"; # cleaned up header with simple ID
-        print $outfh $seq                       if     $rawseq;
-        &DumpFormatedSeq($outfh,\ $seq, $width) unless $rawseq;
-        $IdToSeq{$id}=$seq if $returnhash;
+        my $name_for_IdToSeq = !$head_dup{$id} ? $id : "$id ".$head_dup{$id};
+        print $outfh ">$name_for_IdToSeq\n"; # cleaned header with simple ID
+        print $outfh $seq                        if     $rawseq;
+        &DumpFormatedSeq($outfh,\ $seq, $width)  unless $rawseq;
+        $IdToSeq{$name_for_IdToSeq}=$seq if $returnhash;
         $byseq ? ++$seenSeqs{$seq} : ++$seenIds{$id};
+        $ID_seq{$id} = $seq if !$byseq;
+        ++$list_seq{$seq};
     }
 
     $outfh->close();
     $infh->close();
+    $cleanfh->close();
+    
+    if ($options !~ /byseq/i) {
+        my $outfile_basename = basename("${outfile}.RemoveSeqName");
+        system("cp","${outfile}.RemoveSeqName","./RemoveSeqName");
+        print "\nList of duplicates removed from target sequences: RemoveSeqName\n";
+    }
 
     return(\ %IdToSeq) if $returnhash;
     1;
@@ -601,7 +648,8 @@ sub CreateNrModelAndRunErpin {
         my $model_list = $MENU_LIST->{lc($name)};
         die "No model found for '$name'\n" if !$model_list;
         my $ItemSet   = $model_list->{'Set'};
-        print "\nWork on $name\n";
+        print "\nProcessing $name\n";
+        $LIST_OF_SEARCHED .= $LIST_OF_SEARCHED eq "" ? $name : "_$name";
 
         &CreateNrModelForAllItems($ItemSet,$name);
         &DefineCutoffForAllItems($ItemSet,$FileForCut) if $POURCENTISDEF;
@@ -615,7 +663,6 @@ sub CreateNrModelAndRunErpin {
 sub CreateNrModelForAllItems {
     my ($ItemSet,$name) = @_;
 
-    print "Creating clean copy of models.\n";
     foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
             my $Item          = $ItemSet->{$Item_num};
             my $erpinArg      = $Item->get_erpinArg();
@@ -640,9 +687,10 @@ sub DefineCutoffForAllItems {
     
     print "Define erpin cutoff :\n";
     foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
-        print "\tFor item '$Item_num'\n";
-        next if !$POURCENT;
         my $Item       = $ItemSet->{$Item_num};
+        my $comment     = $Item->get_comment();
+        print "\tFor item $comment\n";
+        next if !$POURCENT;
         my $model_file = $Item->get_ModelFile();
         my $erpinArg   = $Item->get_erpinArg();
         my $cutoff     = $Item->get_cutoff();
@@ -673,7 +721,7 @@ sub DefineCutoffWithPourcent {
             print "\tCutoff defined by erpin contain negative value '$b_cutoff', using cutoff of user.\n";
             last;
         }
-        my $PourcentCutoff = ( $b_cutoff * $POURCENT) / 100;
+        my $PourcentCutoff = ($b_cutoff * $POURCENT) / 100;
         $PourcentCutoff = arrondi($PourcentCutoff,1);
         $newCutoff .= "$PourcentCutoff ";
     }
@@ -702,7 +750,6 @@ sub RunErpinForAllItems {
     my ($ItemSet) = @_;
     
     my @Items_todo = sort { $a <=> $b } keys %$ItemSet;
-    my $totalstart = time;
     my %pidsItems=();
     my %Itemstarttime=();
     print "Run erpin :\n";
@@ -714,8 +761,11 @@ sub RunErpinForAllItems {
             my $donepid = wait;
             next if $donepid < 0; # should never happen?
             my $Item_num = delete($pidsItems{$donepid}) || next;
-            my $start = $Itemstarttime{$Item_num};
-            print "\tProcessing of item '$Item_num' completed in ";
+            my $start    = $Itemstarttime{$Item_num};
+            my $Item     = $ItemSet->{$Item_num};
+            my $comment  = $Item->get_comment();
+            #printf ("%-30s ", "Completed $comment in ");
+            printf("%-50s", "Completed $comment in");
             print strftime("\%H:\%M:\%S", gmtime(time-$start))."\n";
             next;
         }
@@ -724,8 +774,10 @@ sub RunErpinForAllItems {
         # Manage child subprocesses.
         if (my $pid = fork()) {
             $pidsItems{$pid}=$Item_num;
+            my $Item     = $ItemSet->{$Item_num};
+            my $comment = $Item->get_comment();
             $Itemstarttime{$Item_num}=time;
-            print "\tStarting processing of item '$Item_num'\n";
+            print "\tProcessing item $comment\n";
             next;
         }
         
@@ -740,12 +792,12 @@ sub RunErpinForAllItems {
         $erpinArg =~ s/"//g;        
         my $ret = "";
         if (defined($cutoff)) {
-            print STDERR "erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
-            $ret = system("erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
+            $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
         }
         else {
-            print STDERR "erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
-            $ret = system("erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
+            $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
         }
         
         if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
@@ -800,12 +852,12 @@ sub RunErpin {
     
     my $ret = "";
     if (defined($cutoff)) {
-        print STDERR "erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
-        $ret = system("erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+        print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
+        $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
     }
     else {
-        print STDERR "erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
-        $ret = system("erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+        print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
+        $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
     }
     
     if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
@@ -1197,7 +1249,7 @@ sub GetSeqFromOutputFile {
 	
 	foreach my $line (@$Rdata) 	{
 		chomp($line);
-	
+        
 		if($line =~ m/>(.*)/) {
 			$arrayCounter = 0 if $1 ne (defined($header) ? $header : "");
 			$header = $1;
@@ -1600,7 +1652,7 @@ sub AddAcInfo {
 
 sub SelectResult {
     my $AllErpinResult = shift;
-    print "\nMake results selection\n";
+    print "\nSelect best results for overlapping matches.\n";
     # Make results selection 
     foreach my $block_name (keys %$AllErpinResult) {
         my $block = $AllErpinResult->{$block_name};
@@ -1641,6 +1693,12 @@ sub RemoveAlignment {
                 # Reverse loop on ali_block j
                 for (my $j_ali = @$ali_block_j-1 ; $j_ali >= 0 ; $j_ali--) {
                     my $ali_j = $ali_block_j->[$j_ali];
+                    
+                    my $head_i = $ali_i->get_header();
+                    my $head_j = $ali_j->get_header();
+                    next if $head_i ne $head_j;
+                    
+                    
                     my ($start_j,$stop_j,$evalue_j) =
                        ($ali_j->get_LogStart(),$ali_j->get_LogStop(),$ali_j->get_evalue());
                     ($start_j, $stop_j) = ($stop_j, $start_j) if $stop_j < $start_j;
@@ -1817,8 +1875,7 @@ sub RemoveSubBlockWithoutAli {
 
 sub MakeOutput {
     my $AllErpinResult = shift;
-    
-    print "Create output. \n";
+
     &CreateRNAPredictions($AllErpinResult);
 }
 
@@ -1891,7 +1948,6 @@ sub CreateRNAPredictions {
     close (CSMFILE);
     
     &CopyResults($aliFile,$logFile,$csmFile,$xmlFile);
-    my $a = 0;
 }
 
 sub CreateHeadString {
@@ -1984,6 +2040,8 @@ sub AddInfoForeachAli {
 sub CopyResults {
     # Copy results to user's selected output files
     my ($aliFile,$logFile,$csmFile,$xmlFile) = @_;
+    
+    $CUSTOMOUTFILE = "${DATAFILE}_${LIST_OF_SEARCHED}.csm" if $CSMOUTFILE_NOTDEF;
     
     if ($ALIGNEDOUTFILE) {
         my $infh  = new IO::File "<$aliFile"
