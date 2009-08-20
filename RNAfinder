@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.16 2009/08/14 18:50:29 nbeck Exp $
+#    $Id: RNAfinder,v 1.17 2009/08/20 21:31:25 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.17  2009/08/20 21:31:25  nbeck
+#    Added resume and NoSolution file.
+#
 #    Revision 1.16  2009/08/14 18:50:29  nbeck
 #    Fixed bug with contig, cleaned data file (-d).
 #    Changed nice of erpin and screen output.
@@ -105,7 +108,7 @@ use POSIX qw{strftime};
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.16 2009/08/14 18:50:29 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.17 2009/08/20 21:31:25 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -168,8 +171,9 @@ This program ($BASENAME):
 
 Usage:
 -------------------
-$BASENAME [-d] [-c genetic code] -g fastagenome -m model
-               [-A alignedOut] [-L logOut] [-X xmlOut] [-C CustomOut]
+$BASENAME [-D] [-c genetic code] -d datafile -m model
+               [-A alignedOut] [-L logOut] [-X xmlOut] [-C CustomOut] 
+               [-pc pourcent] [-P nb_proc] [-l]
 
 Input data options:
 -------------------
@@ -210,7 +214,7 @@ Other options:
 --------------
 -l               List of available models. Create with Menufile. Accepted value 1 or 2.
 
--d               Turn on debug mode; some temporary files will be left in
+-D               Turn on debug mode; some temporary files will be left in
                  a subdirectory created in /tmp, available for inspection.
                  
 -P               Used to define the number of processor.
@@ -330,7 +334,7 @@ my $CSMOUTFILE_NOTDEF = 0;
 my $CODON_TABLE   = "";
 my $POURCENT      = 0;
 my $POURCENTISDEF = undef;
-my $TOTALSTART = time;
+my $TOTALSTART    = time;
 
 ###########################
 # Deal with the arguments #
@@ -374,6 +378,12 @@ if ($LIST) {
 
 # Parsing Erpin Arguments
 my @NAME_LIST = split(/,/,$MODELNAME);
+my $NAME_LIST = {};
+foreach my $arg (@NAME_LIST){
+    my ($name,$list) = ("","");
+    $arg =~ m/(.+)\((.+)\)/ ? ($name,$list) = ($1,$2) : $name = $arg;
+    $NAME_LIST->{$name} = $list;
+}
 
 #################################
 # Validate command-line options #
@@ -439,10 +449,13 @@ if ($PARALLELISM > $NB_PROC) {
    print "This computer hav only $NB_PROC processor, used all processor\n";
    $PARALLELISM = $NB_PROC;
 }
+my $Ret_Rseqs = {};
 my ($nr_genome,$Rseqs) = &CreateNrGenome();
 my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &SelectResult($AllErpinResult);
 &MakeOutput($AllErpinResult);
+&ScreenOutput($AllErpinResult);
+&ListOfEmptySeq($Ret_Rseqs,$Rseqs);
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
 
@@ -764,8 +777,7 @@ sub RunErpinForAllItems {
             my $start    = $Itemstarttime{$Item_num};
             my $Item     = $ItemSet->{$Item_num};
             my $comment  = $Item->get_comment();
-            #printf ("%-30s ", "Completed $comment in ");
-            printf("%-50s", "Completed $comment in");
+            printf("%-50s", "Completed $comment");
             print strftime("\%H:\%M:\%S", gmtime(time-$start))."\n";
             next;
         }
@@ -777,7 +789,7 @@ sub RunErpinForAllItems {
             my $Item     = $ItemSet->{$Item_num};
             my $comment = $Item->get_comment();
             $Itemstarttime{$Item_num}=time;
-            print "\tProcessing item $comment\n";
+            print "\tProcessing $comment\n";
             next;
         }
         
@@ -792,11 +804,11 @@ sub RunErpinForAllItems {
         $erpinArg =~ s/"//g;        
         my $ret = "";
         if (defined($cutoff)) {
-            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
+            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr\n" if $DEBUG;
             $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
         }
         else {
-            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
+            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr\n" if $DEBUG;
             $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
         }
         
@@ -833,7 +845,9 @@ sub CreateErpinResultForAllItems {
         $erpinResult->set_modTab($modTab);
         $erpinResult->set_NumItem($Item_num);
         my $label         = $Item->get_Label();
+        my $comment       = $Item->get_comment();
         $erpinResult->set_Label($label);
+        $erpinResult->set_comment($comment);
         
         # Add anticodon information
         my $Ac_id         = $Item->get_AcId();
@@ -950,6 +964,7 @@ sub MakeModel {
 	my $structure = GetStructureFromModelFile(\@modelFile);
 	#Count number of sequences in the model
 	my $numModels = @outSeqsEvalueOrder;
+    $ErpinResult->set_OriSol($numModels);
 	
 	#############################
 	# 6. Build new training set #
@@ -1191,7 +1206,7 @@ sub MakeModel {
                         AliForAli  => $AliSeq,
                         AliForLog  => $reportSeq,
                         HeadForAli => $HeadForAli,
-                        HeadForLog => $HeadForLog
+                        HeadForLog => $HeadForLog,
                         );
        push(@$Alignments,$Alignment);
 	}
@@ -1306,7 +1321,6 @@ sub GetSeqFromOutputFile {
 		print YELLOW "DEBUG: end size           = " . keys(%end) . "\n";
 		print YELLOW "DEBUG: evalue size        = " . keys(%eValue) . "\n";
 	}
-	
 	return($Rseqs, \@eValueOrder, \@originalOrder, \%dir, \%start, \%end, \%eValue, $first, $last, $numberResults);
 }
 
@@ -1686,7 +1700,7 @@ sub RemoveAlignment {
                 # Treat modular case
                 my ($iInj,$jIni,$iIsj) = &CompareModBlock($mod_block_i,$mod_block_j) if (@$mod_block_i) != 0;
                 # Specially for non modular case
-                   $iIsj = 1 if (@$mod_block_i) = 0;
+                $iIsj = 1 if (@$mod_block_i) = 0;
                 next if !$iInj && !$jIni && !$iIsj;
                 
                 my $ali_block_j  = $sub_block_j->get_Alignments();
@@ -1697,7 +1711,6 @@ sub RemoveAlignment {
                     my $head_i = $ali_i->get_header();
                     my $head_j = $ali_j->get_header();
                     next if $head_i ne $head_j;
-                    
                     
                     my ($start_j,$stop_j,$evalue_j) =
                        ($ali_j->get_LogStart(),$ali_j->get_LogStop(),$ali_j->get_evalue());
@@ -1736,16 +1749,16 @@ sub CompareModBlock {
     foreach my $element (@$cp_arrayJ) { $count2->{$element}++ }
     
     # Treat array 1
-    foreach my $element (@$cp_arrayJ) { $count2->{$element}++ }
+    #foreach my $element (@$cp_arrayJ) { $count2->{$element}++ }
     for (my $i = @$cp_arrayI-1 ; $i >= 0 ; $i--) {
         my $i_val = $cp_arrayI->[$i];
         splice(@$cp_arrayI, $i, 1) if  defined($count2->{$i_val});
     }
     
     # Treat array 2
-    for (my $i = @$cp_arrayJ-1 ; $i >= 0 ; $i--) {
-        my $i_val = $cp_arrayJ->[$i];
-        splice(@$cp_arrayJ, $i, 1) if defined($count2->{$i_val});
+    for (my $j = @$cp_arrayJ-1 ; $j >= 0 ; $j--) {
+        my $j_val = $cp_arrayJ->[$j];
+        splice(@$cp_arrayJ, $j, 1) if defined($count1->{$j_val});
     }
 
     my $array_IinJ = scalar(@$cp_arrayI) == 0 ? 1 : 0 ;
@@ -1896,8 +1909,10 @@ sub CreateRNAPredictions {
         or die "Can't write to .csm file '$csmFile': $!\n";
 
     # Treat .ali .log and .ali .csm
+    my ($ali_str,$log_str,$csm_str) = ("","","");
     my $AllRNAPred = [];
     my $AllRNAPredictionList = [];
+    my $nbTotRes   = 0;
     foreach my $block_name (keys %$AllResult) {
         my $block      = $AllResult->{$block_name};
         for(my $i = 0; $i < scalar(@$block); $i++) {
@@ -1908,23 +1923,21 @@ sub CreateRNAPredictions {
             my $structure  = $sub_block->get_structure();
             my $consensus  = $sub_block->get_consensus();
             my $Alignments = $sub_block->get_Alignments();
+            my $comment    = $sub_block->get_comment();
            
             my $RNAPredictionList = PirObject::RNAPredictionList->new();
             
             my $nb_ali = scalar(@$Alignments);
             
             my ($aliString,$logString,$csmString) 
-                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$structure,$consensus,$bracket);
+                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket);
             my $predictlist = [];
             ($predictlist,$aliString,$logString,$csmString) 
                 = &AddInfoForeachAli($Alignments,$aliString,$logString,$csmString);
            
-            $aliString .= "\n\n";
-            $logString .= "\n\n";
-            $csmString .= "\n\n";
-            print ALIFILE "$aliString";
-            print LOGFILE "$logString";
-            print CSMFILE "$csmString";
+            $ali_str .= "\n\n$aliString";
+            $log_str .= "\n\n$logString";
+            $csm_str .= "\n\n$csmString";
 
             $RNAPredictionList->set_Name($block_name);
             $RNAPredictionList->set_NumItem($numItem);
@@ -1933,6 +1946,11 @@ sub CreateRNAPredictions {
             push(@$AllRNAPred, $RNAPredictionList);
         }
     }
+    
+    
+    print ALIFILE "$ali_str";
+    print LOGFILE "$log_str";
+    print CSMFILE "$csm_str";
     
     # Treat XML File.
     my $outfh = new IO::File ">$xmlFile"
@@ -1951,12 +1969,12 @@ sub CreateRNAPredictions {
 }
 
 sub CreateHeadString {
-    my ($block_name,$numItem,$nb_ali,$label,$structure,$consensus,$bracket) = @_;
+    my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket) = @_;
     
     my $headString .=  "\n*************************************************\n";
     $headString .=  "Alignment for $block_name item $numItem\n";
     $headString .=  "*************************************************\n\n";
-    $headString .=  "There are $nb_ali matches\n";
+    $headString .=  "There are $nb_ali matches for $comment\n";
     $headString .=  "Processing label: $label\n" if defined $label;
     $headString .=  "\n";
     
@@ -1976,6 +1994,7 @@ sub CreateHeadString {
 
     return ($aliString,$logString,$csmString);
 }
+
 sub AddInfoForeachAli {
     my ($Alignments,$aliString,$logString,$csmString) = @_;
     
@@ -2035,6 +2054,51 @@ sub AddInfoForeachAli {
         push(@$predictlist,$RNAPrediction);
     }
     return ($predictlist,$aliString,$logString,$csmString);
+}
+
+sub ScreenOutput {
+    my $AllResult = shift;
+    
+    my $nbTotRes   = 0;
+    printf("\n%-30s %30s %30s \n%-30s %30s %30s", "","Initial #","Retained #","","of solution","of solution");
+    
+    foreach my $block_name (keys %$AllResult) {
+        my $block      = $AllResult->{$block_name};
+        for(my $i = 0; $i < scalar(@$block); $i++) {
+            my $sub_block  = $block->[$i];
+            my $comment    = $sub_block->get_comment();
+            my $nbOriSol   = $sub_block->get_OriSol();
+            my $Alignments = $sub_block->get_Alignments();
+            my $nbRetSol   = scalar(@$Alignments);
+            foreach my $ali (@$Alignments){
+                my $header = $ali->get_header();
+                $Ret_Rseqs->{$header}++;
+            }
+            $nbTotRes     += $nbRetSol;
+            printf("\n%-30s %30s %30s", "$comment","$nbOriSol","$nbRetSol");
+        }
+    }
+    printf("\n%-30s %30s %30s\n", "Total","","$nbTotRes");
+}
+
+sub ListOfEmptySeq {
+    my ($Ret_Rseqs,$Rseqs) = @_;
+    
+    my $NoSol = new IO::File ">$TMP_DIR/NoSolution"
+        or die "Can't write to file '$TMP_DIR/NoSolution': $!\n";
+
+    foreach my $Seq_name ( keys %$Ret_Rseqs ) {
+        delete $Rseqs->{$Seq_name};
+    }
+    foreach my $Seq_name ( keys %$Rseqs ) {
+        print $NoSol "$Seq_name\n";
+    }
+    
+    $NoSol->close();
+    
+    system("cp","$TMP_DIR/NoSolution","./NoSolution");
+    print "\nList of sequences without solution in file: NoSolution\n";
+    
 }
 
 sub CopyResults {
