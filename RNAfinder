@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.17 2009/08/20 21:31:25 nbeck Exp $
+#    $Id: RNAfinder,v 1.18 2009/09/01 20:45:29 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.18  2009/09/01 20:45:29  nbeck
+#    Fixed bug when empty result, fixed bug for tRNA H, some esthetic modification.
+#
 #    Revision 1.17  2009/08/20 21:31:25  nbeck
 #    Added resume and NoSolution file.
 #
@@ -108,7 +111,7 @@ use POSIX qw{strftime};
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.17 2009/08/20 21:31:25 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.18 2009/09/01 20:45:29 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -382,8 +385,9 @@ my $NAME_LIST = {};
 foreach my $arg (@NAME_LIST){
     my ($name,$list) = ("","");
     $arg =~ m/(.+)\((.+)\)/ ? ($name,$list) = ($1,$2) : $name = $arg;
-    $NAME_LIST->{$name} = $list;
+    $NAME_LIST->{$name} = lc($list);
 }
+my $abc = 0;
 
 #################################
 # Validate command-line options #
@@ -453,14 +457,14 @@ my $Ret_Rseqs = {};
 my ($nr_genome,$Rseqs) = &CreateNrGenome();
 my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &SelectResult($AllErpinResult);
-&MakeOutput($AllErpinResult);
+&CreateRNAPredictions($AllErpinResult);
 &ScreenOutput($AllErpinResult);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
 
 #End of the script
-printf("%-50s", "Finished");
+printf("%-49s", "Finished");
 print strftime("\%H:\%M:\%S", gmtime(time-$TOTALSTART))."\n";
 exit(0);
 
@@ -657,14 +661,15 @@ sub CreateNrModelAndRunErpin {
     my $AllErpinResult = {};
     
     my $FileForCut = &CreateFileForCutoff if $POURCENTISDEF;
-    foreach my $name (@NAME_LIST) {
+    foreach my $name (sort(keys %$NAME_LIST)) {
+        my @list = split(/\|/, $NAME_LIST->{$name});
         my $model_list = $MENU_LIST->{lc($name)};
         die "No model found for '$name'\n" if !$model_list;
-        my $ItemSet   = $model_list->{'Set'};
+        my $ItemSet    = $model_list->{'Set'};
         print "\nProcessing $name\n";
         $LIST_OF_SEARCHED .= $LIST_OF_SEARCHED eq "" ? $name : "_$name";
 
-        &CreateNrModelForAllItems($ItemSet,$name);
+        &CreateNrModelForAllItems($ItemSet,$name,\@list);
         &DefineCutoffForAllItems($ItemSet,$FileForCut) if $POURCENTISDEF;
         &RunErpinForAllItems($ItemSet);
         my $erpin_res = &CreateErpinResultForAllItems($ItemSet);
@@ -674,25 +679,36 @@ sub CreateNrModelAndRunErpin {
 }
 
 sub CreateNrModelForAllItems {
-    my ($ItemSet,$name) = @_;
+    my ($ItemSet,$name,$list) = @_;
 
-    foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
-            my $Item          = $ItemSet->{$Item_num};
-            my $erpinArg      = $Item->get_erpinArg();
-            my $modelFile     = $Item->get_modelFile();
-            my @ERPINARGS     = split(/\s+/,$erpinArg);
-            my @erpinMaskNums = ParseErpinArgs(@ERPINARGS);
-            my $model_file    = &CreateNrModel($modelFile,\@erpinMaskNums,$Item_num,\@MOD_PATH);
-            $Item->set_ModelFile($model_file);
-            my $erpinSuf      = "${TMP_DIR}/${name}_$Item_num";
-            my $erpinOut      = "$erpinSuf.out";
-            my $erpinErr      = "$erpinSuf.err";
-            $Item->set_erpinOut($erpinOut);
-            $Item->set_erpinErr($erpinErr);
-            $Item->set_erpinMaskNums(\@erpinMaskNums);
-            $Item->set_lowest($erpinMaskNums[0]);
+    foreach my $sub_clans (@$list) {
+        my $isInList = 0;
+        foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
+            my $Item  = $ItemSet->{$Item_num};
+            my $label = $Item->get_Label();
+            $isInList = 1 if lc($sub_clans) eq lc($label);
         }
-
+        print "No sub clans with label $sub_clans in $name\n" if !$isInList;
+    }
+    
+    foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
+        my $Item          = $ItemSet->{$Item_num};
+        my $label         = lc($Item->get_Label());
+        next if !grep(/$label/,@$list) && scalar(@$list);
+        my $erpinArg      = $Item->get_erpinArg();
+        my $modelFile     = $Item->get_modelFile();
+        my @ERPINARGS     = split(/\s+/,$erpinArg);
+        my @erpinMaskNums = ParseErpinArgs(@ERPINARGS);
+        my $model_file    = &CreateNrModel($modelFile,\@erpinMaskNums,$Item_num,\@MOD_PATH);
+        $Item->set_ModelFile($model_file);
+        my $erpinSuf      = "${TMP_DIR}/${name}_$Item_num";
+        my $erpinOut      = "$erpinSuf.out";
+        my $erpinErr      = "$erpinSuf.err";
+        $Item->set_erpinOut($erpinOut);
+        $Item->set_erpinErr($erpinErr);
+        $Item->set_erpinMaskNums(\@erpinMaskNums);
+        $Item->set_lowest($erpinMaskNums[0]);
+    }
 }
 
 sub DefineCutoffForAllItems {
@@ -701,6 +717,7 @@ sub DefineCutoffForAllItems {
     print "Define erpin cutoff :\n";
     foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
         my $Item       = $ItemSet->{$Item_num};
+        next if !$Item->get_ModelFile();
         my $comment     = $Item->get_comment();
         print "\tFor item $comment\n";
         next if !$POURCENT;
@@ -763,6 +780,14 @@ sub RunErpinForAllItems {
     my ($ItemSet) = @_;
     
     my @Items_todo = sort { $a <=> $b } keys %$ItemSet;
+    
+    for (my $i = @Items_todo-1 ; $i >= 0 ; $i--) {
+        my $Item_num = $Items_todo[$i];
+        my $Item     = $ItemSet->{$Item_num};
+        next if $Item->get_ModelFile();
+        splice(@Items_todo, $i, 1);
+    }
+    
     my %pidsItems=();
     my %Itemstarttime=();
     print "Run erpin :\n";
@@ -777,8 +802,10 @@ sub RunErpinForAllItems {
             my $start    = $Itemstarttime{$Item_num};
             my $Item     = $ItemSet->{$Item_num};
             my $comment  = $Item->get_comment();
+            my $time     = strftime("\%H:\%M:\%S", gmtime(time-$start));
+            $Item->set_time($time);
             printf("%-50s", "Completed $comment");
-            print strftime("\%H:\%M:\%S", gmtime(time-$start))."\n";
+            print "$time\n";
             next;
         }
         my $Item_num = shift(@Items_todo);
@@ -828,10 +855,12 @@ sub CreateErpinResultForAllItems {
     foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
         my $Item          = $ItemSet->{$Item_num};
         my $model_file    = $Item->get_ModelFile();
+        next if !$Item->get_ModelFile();
         my $erpinArg      = $Item->get_erpinArg();
         my $erpinMaskNums = $Item->get_erpinMaskNums();
         my $lowest        = $Item->get_lowest();
         my $erpinOut      = $Item->get_erpinOut();
+        my $time          = $Item->get_time();
         my $erpinSuff     = $erpinOut;
            $erpinSuff     =~ s/.out$//;
         my $erpinLog      = "$erpinSuff.log";
@@ -844,6 +873,7 @@ sub CreateErpinResultForAllItems {
         my $modTab        = $Item->get_modTab();
         $erpinResult->set_modTab($modTab);
         $erpinResult->set_NumItem($Item_num);
+        $erpinResult->set_time($time);
         my $label         = $Item->get_Label();
         my $comment       = $Item->get_comment();
         $erpinResult->set_Label($label);
@@ -1222,7 +1252,7 @@ sub MakeModel {
     $ErpinResult->set_fileName($DATAFILE);
     $ErpinResult->set_Alignments($Alignments);
     
-	scalar(@$Alignments) == 0 ? "" : return ($ErpinResult);
+	return ($ErpinResult);
 }
 
 sub GetConsensus {
@@ -1634,7 +1664,7 @@ sub AddAcInfo {
         my $begin_ac = 0;
         if ($strand eq "FW") {
             my $seq_before_ac  =  substr($AliForAli,0,$ac_offset);
-               $seq_before_ac  =~ tr/\-//cd;
+               $seq_before_ac  =~ s/-+//g;
                $begin_ac       = $tRNA_begin + length($seq_before_ac);
                $tRNA_end       = $tRNA_end;
         }
@@ -1642,9 +1672,8 @@ sub AddAcInfo {
         if ($strand eq "RC") {
             my $revseq        = reverse $AliForAli;
             my $seq_before_ac = substr($revseq,0,$rac_offset);
-            $seq_before_ac    =~ tr/\-//cd;
+            $seq_before_ac    =~ s/-+//g;
             $begin_ac         = $tRNA_begin + length($seq_before_ac);
-            ($tRNA_begin,$tRNA_end) = ($tRNA_end, $tRNA_begin);
         }
         
         $Alignment->set_AcStart($begin_ac);
@@ -1655,8 +1684,9 @@ sub AddAcInfo {
         next if $aa ne "H";
         # 1 bp adjustment at 3' for Histidines
         $tRNA_begin-- if $strand eq "FW";
-        $tRNA_begin++ if $strand eq "RC";
-        $Alignment->set_AliStart($tRNA_begin);
+        $tRNA_end++   if $strand eq "RC";
+        $Alignment->set_AliStart($tRNA_begin) if $strand eq "FW";
+        $Alignment->set_AliStop($tRNA_end)    if $strand eq "RC";
     }
 }
 
@@ -1672,7 +1702,6 @@ sub SelectResult {
         my $block = $AllErpinResult->{$block_name};
         next if scalar(@$block) <= 1;
         &RemoveAlignment($block);
-        &RemoveSubBlockWithoutAli($block);
     }
 }
 
@@ -1710,6 +1739,8 @@ sub RemoveAlignment {
                     
                     my $head_i = $ali_i->get_header();
                     my $head_j = $ali_j->get_header();
+                    my $headL_i = $ali_i->get_HeadForLog();
+                    my $headL_j = $ali_j->get_HeadForLog();
                     next if $head_i ne $head_j;
                     
                     my ($start_j,$stop_j,$evalue_j) =
@@ -1723,11 +1754,15 @@ sub RemoveAlignment {
                         $evalue_j = "1e-100" if $evalue_j =~ m/^([\+\-]?)([\d\.]*)(?:e([\+\-]?00))?$/x;
                         my $iHaveBetterEvalue =  &CompareHighPrecisionFloats($evalue_i,$evalue_j) == -1  ? 1 : 0;
                         # Keep result with better evalue
+                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_j\n\n" if $iHaveBetterEvalue == 0;
+                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_i\n\n" if $iHaveBetterEvalue == 1;
                         splice(@$ali_block_i, $i_ali, 1) if $iHaveBetterEvalue == 0; # splice i
                         splice(@$ali_block_j, $j_ali, 1) if $iHaveBetterEvalue == 1; # splice j
                     }
                     else {
                         # Keep result with better evalue
+                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_j\n\n" if $jIni;
+                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_i\n\n" if $iInj;
                         splice(@$ali_block_j, $j_ali, 1) if $jIni; # splice i
                         splice(@$ali_block_i, $i_ali, 1) if $iInj; # splice j
                     }
@@ -1872,25 +1907,9 @@ sub CompareHighPrecisionFloats {
     return ($xman <=> $yman);                    # $x and $y have same EXP, so compare mantissas
 }
 
-sub RemoveSubBlockWithoutAli {
-    my $block = shift;
-    
-    for (my $i = @$block-1 ; $i >= 0 ; $i--) {
-        my $sub_block_i = $block->[$i];
-        my $ali_block_i = $sub_block_i->get_Alignments();
-        splice(@$block, $i, 1) if scalar(@$ali_block_i) == 0;
-    }
-}
-
 ################
 #  For Output  #
 ################
-
-sub MakeOutput {
-    my $AllErpinResult = shift;
-
-    &CreateRNAPredictions($AllErpinResult);
-}
 
 sub CreateRNAPredictions {
     my $AllResult = shift;
@@ -1916,19 +1935,19 @@ sub CreateRNAPredictions {
     foreach my $block_name (keys %$AllResult) {
         my $block      = $AllResult->{$block_name};
         for(my $i = 0; $i < scalar(@$block); $i++) {
-            my $sub_block  = $block->[$i];
-            my $numItem    = $sub_block->get_NumItem();
-            my $label      = $sub_block->get_Label();
-            my $bracket    = $sub_block->get_bracket();
-            my $structure  = $sub_block->get_structure();
-            my $consensus  = $sub_block->get_consensus();
-            my $Alignments = $sub_block->get_Alignments();
-            my $comment    = $sub_block->get_comment();
+            my $sub_block   = $block->[$i];
+            my $Alignments  = $sub_block->get_Alignments();
+            my $nb_ali      = scalar(@$Alignments);
+            next if $nb_ali == 0;
+            my $numItem     = $sub_block->get_NumItem();
+            my $label       = $sub_block->get_Label();
+            my $bracket     = $sub_block->get_bracket();
+            my $structure   = $sub_block->get_structure();
+            my $consensus   = $sub_block->get_consensus();
+            my $comment     = $sub_block->get_comment();
            
             my $RNAPredictionList = PirObject::RNAPredictionList->new();
-            
-            my $nb_ali = scalar(@$Alignments);
-            
+                        
             my ($aliString,$logString,$csmString) 
                 = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket);
             my $predictlist = [];
@@ -1948,9 +1967,9 @@ sub CreateRNAPredictions {
     }
     
     
-    print ALIFILE "$ali_str";
-    print LOGFILE "$log_str";
-    print CSMFILE "$csm_str";
+    print ALIFILE "$ali_str" if $ali_str;
+    print LOGFILE "$log_str" if $log_str;
+    print CSMFILE "$csm_str" if $csm_str;
     
     # Treat XML File.
     my $outfh = new IO::File ">$xmlFile"
@@ -2060,7 +2079,7 @@ sub ScreenOutput {
     my $AllResult = shift;
     
     my $nbTotRes   = 0;
-    printf("\n%-30s %30s %30s \n%-30s %30s %30s", "","Initial #","Retained #","","of solution","of solution");
+    printf("\n%-25s %15s %15s \n%-25s %15s %15s", "","Initial #","Retained #","","of solution","of solution");
     
     foreach my $block_name (keys %$AllResult) {
         my $block      = $AllResult->{$block_name};
@@ -2068,6 +2087,7 @@ sub ScreenOutput {
             my $sub_block  = $block->[$i];
             my $comment    = $sub_block->get_comment();
             my $nbOriSol   = $sub_block->get_OriSol();
+            my $time       = $sub_block->get_time();
             my $Alignments = $sub_block->get_Alignments();
             my $nbRetSol   = scalar(@$Alignments);
             foreach my $ali (@$Alignments){
@@ -2075,10 +2095,11 @@ sub ScreenOutput {
                 $Ret_Rseqs->{$header}++;
             }
             $nbTotRes     += $nbRetSol;
-            printf("\n%-30s %30s %30s", "$comment","$nbOriSol","$nbRetSol");
+            $nbOriSol = 0 if !$nbOriSol;
+            printf("\n%-25.20s %15s %15s %15s", "$comment","$nbOriSol","$nbRetSol","$time");
         }
     }
-    printf("\n%-30s %30s %30s\n", "Total","","$nbTotRes");
+    printf("\n%-25s %15s %15s\n", "Total","","$nbTotRes");
 }
 
 sub ListOfEmptySeq {
