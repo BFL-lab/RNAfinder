@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.18 2009/09/01 20:45:29 nbeck Exp $
+#    $Id: RNAfinder,v 1.19 2009/09/11 18:24:39 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.19  2009/09/11 18:24:39  nbeck
+#    Support for online version.
+#
 #    Revision 1.18  2009/09/01 20:45:29  nbeck
 #    Fixed bug when empty result, fixed bug for tRNA H, some esthetic modification.
 #
@@ -106,12 +109,13 @@ use Bio::Tools::CodonTable;
 use vars qw( $VERSION $RCS_VERSION );
 use lib    ( "./lib" );
 use POSIX qw{strftime};
+use MIME::Lite;
 
 # Default umask
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.18 2009/09/01 20:45:29 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.19 2009/09/11 18:24:39 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -222,6 +226,10 @@ Other options:
                  
 -P               Used to define the number of processor.
                  Default RNAfinder look at the number of processor.
+                 
+-I               Only used by the web version in order to give PID.
+
+-a               Mail address in order to send result by mail.
 
 -pc              Percentage of cutoff values defined by erpin.
 USAGE
@@ -306,7 +314,7 @@ sub CheckModuleList {
 ###########################
 if (@ARGV == 0) {
 	print "There were no arguments passed on the command line. This program takes arguments\n";
-	Usage();
+	&Usage();
 }
 
 ##################################
@@ -314,16 +322,19 @@ if (@ARGV == 0) {
 ##################################
 $|=1;
 
+
+
 # Input options
 my $DATAFILE    = ""; # -d
 my $MODELNAME   = ""; # -m
 my $GENETICCODE = ""; # -c
 
 # Default parameters for the script
-my $DEBUG       = 0; # -D
-my $LIST        = 0; # -l
-my $PARALLELISM = 0; # -P
-my $TMP_DIR     = "/tmp/RNAfinder.$$";
+my $DEBUG       = 0;  # -D
+my $LIST        = 0;  # -l
+my $PARALLELISM = 0;  # -P
+my $CGI         = 0;  # -I
+my $MAIL_ADR    = ""; # -a 
 
 # Output options
 my $ERPINOUTFILE   = ""; # -E
@@ -345,11 +356,11 @@ my $TOTALSTART    = time;
 
 for (;@ARGV;) {
     # Add in the regex [] ALL single-character command-line options
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([dcmlALXCPD]|pc)(.*)$/);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([adcmlALXCPDI]|pc)(.*)$/);
     last if ! defined $opt;
     # Add in regex [] ONLY single-character options that
     # REQUIRE an argument, except for the 'd' debug switch.
-    if ($opt =~ /[dcmlALXCP]|pc/ && $arg eq "") {
+    if ($opt =~ /[adcmlALXCPI]|pc/ && $arg eq "") {
         if (@ARGV < 2) {
             print "Argument required for option \"$opt\".\n";
             exit 1;
@@ -357,6 +368,7 @@ for (;@ARGV;) {
         shift;
         $arg=$ARGV[0];
     }
+    $MAIL_ADR       = $arg              if $opt eq 'a'; 
     $POURCENT       = $arg              if $opt eq 'pc';
     $POURCENTISDEF  = 1                 if $opt eq 'pc';
     $GENETICCODE    = $arg              if $opt eq 'c';
@@ -368,9 +380,12 @@ for (;@ARGV;) {
     $XMLOUTFILE     = $arg              if $opt eq 'X';
     $CUSTOMOUTFILE  = $arg              if $opt eq 'C';
     $DEBUG          = ($arg ? $arg : 1) if $opt eq 'D';
+    $CGI            = $arg              if $opt eq 'I';
     $PARALLELISM    = $arg              if $opt eq 'P';
     shift;
 }
+
+umask 000 if $CGI;
 
 if ($LIST) {
     die "Available value for -l is 1 or 2!\n" 
@@ -387,7 +402,7 @@ foreach my $arg (@NAME_LIST){
     $arg =~ m/(.+)\((.+)\)/ ? ($name,$list) = ($1,$2) : $name = $arg;
     $NAME_LIST->{$name} = lc($list);
 }
-my $abc = 0;
+
 
 #################################
 # Validate command-line options #
@@ -416,7 +431,10 @@ $SIG{'ALRM'} = \&SigCleanup;
 ##########################################################
 # Check Sequences file and define models directory       #
 ##########################################################
-unless (-d $TMP_DIR) { mkdir($TMP_DIR,0755); }
+my $TMP_DIR = $CGI ? "/services/WWW/cgi-bin/RNAweasel/UserFiles/$CGI/RNAweasel"
+                   : "/tmp/RNAfinder.$$";
+
+unless (-d $TMP_DIR) { mkdir($TMP_DIR,0777); }
 
 my $HOME = $ENV{"HOME"};
 # Models and lib path
@@ -440,17 +458,17 @@ if (defined($POURCENTISDEF)) {
     die 'Value of option -pc must be include between 0 and 100' 
         if !($POURCENT > 0 && $POURCENT <= 100);
 }
-checkFile($DATAFILE);
+&checkFile($DATAFILE);
 
 ########
 # MAIN #
 ########
 
 # Create non-redundant versions of the genome file.
-my $NB_PROC            = &DefineNumberOfProcessor();
-$PARALLELISM           = $NB_PROC if !$PARALLELISM;
+my $NB_PROC   = $CGI ? 2 : &DefineNumberOfProcessor();
+$PARALLELISM  = $NB_PROC if !$PARALLELISM;
 if ($PARALLELISM > $NB_PROC) {
-   print "This computer hav only $NB_PROC processor, used all processor\n";
+   print "This computer have only $NB_PROC processor, used all processor\n";
    $PARALLELISM = $NB_PROC;
 }
 my $Ret_Rseqs = {};
@@ -460,8 +478,9 @@ my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &CreateRNAPredictions($AllErpinResult);
 &ScreenOutput($AllErpinResult);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
-print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
-system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
+&sendMail();
+print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG && !$CGI; 
+system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG && !$CGI;
 
 #End of the script
 printf("%-49s", "Finished");
@@ -522,7 +541,6 @@ sub CreateNrModel {
     return ($nr_model);
 }
 
-
 # Yet another FASTA parser/loader/validator/copier.
 sub CopyWithoutDuplicates {
     my $infile        = shift;
@@ -573,7 +591,7 @@ sub CopyWithoutDuplicates {
         # Header line.
         my $newid = $1; # from regex above
 
-        # # Dump previous record if needed
+        # Dump previous record if needed
         my $isdupl = 0;
         if (defined($byseq)) {
             $isdupl = $seenSeqs{$Interest_seq};
@@ -632,9 +650,8 @@ sub CopyWithoutDuplicates {
     if ($options !~ /byseq/i) {
         my $outfile_basename = basename("${outfile}.RemoveSeqName");
         system("cp","${outfile}.RemoveSeqName","./RemoveSeqName");
-        print "\nList of duplicates removed from target sequences: RemoveSeqName\n";
+        print "\nList of duplicates removed from target sequences: RemoveSeqName\n" if !$CGI;
     }
-
     return(\ %IdToSeq) if $returnhash;
     1;
 }
@@ -652,7 +669,7 @@ sub DumpFormatedSeq {
         print $fh substr($$seqref,$i,$rest),"\n";
     }
 }
-
+ 
 ###############
 # Run erpin   #
 ###############
@@ -830,13 +847,14 @@ sub RunErpinForAllItems {
         
         $erpinArg =~ s/"//g;        
         my $ret = "";
+        my $erpin = $CGI ? "/share/supported/bin/erpin" : "erpin";
         if (defined($cutoff)) {
-            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr\n" if $DEBUG;
-            $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+            print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr\n" if $DEBUG;
+            $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
         }
         else {
-            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr\n" if $DEBUG;
-            $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+            print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr\n" if $DEBUG;
+            $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
         }
         
         if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
@@ -895,13 +913,14 @@ sub RunErpin {
     print STDERR "Running erpin for item $Item_num...\n" if $Item_num;
     
     my $ret = "";
+    my $erpin = $CGI ? "/share/supported/bin/erpin" : "erpin";
     if (defined($cutoff)) {
-        print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
-        $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+        print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
+        $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
     }
     else {
-        print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
-        $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+        print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
+        $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
     }
     
     if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
@@ -1151,7 +1170,7 @@ sub MakeModel {
 			if($dir eq "RC") { 
 			# We need to reverse-complement the original sequence
 				if(($prefixLen + $stop) < length($seq)) {
-					$headSeq = substr($seq, $stop, $prefixLen);
+				    $headSeq = substr($seq, $stop, $prefixLen);
 					$headSeq = reverse($headSeq);
 					$headSeq =~ tr/ACGTacgt/TGCAtgca/;
 				}
@@ -1254,7 +1273,7 @@ sub MakeModel {
     
 	return ($ErpinResult);
 }
-
+ 
 sub GetConsensus {
     my $modelFile = shift;
     
@@ -1382,7 +1401,7 @@ sub GetStructureFromModelFile {
 	}
 	return $structure; 
 }
-
+ 
 sub GetStructurePos {
 	my $structure = shift;
 	my $pos       = shift;
@@ -1404,7 +1423,7 @@ sub GetStructureLength {
 	my ($struct1, $struct2) = split /\n/, $structure;
 	return length($struct2);
 }
-
+ 
 sub makeReportSeq {
 	my $inSeq     = shift;
 	my @maxBitLen = @_;
@@ -1455,7 +1474,7 @@ sub makeReportSeq {
 	}
 	return $outSeq;
 }
-
+ 
 sub modifyModelSeq {
   my $model               = shift;
   my ($struct1, $struct2) = split("\n", shift);
@@ -1638,8 +1657,8 @@ sub AddAcInfo {
     $linstruct->ImportFromMultipleAlignment($align_fh); # will close the filehandle
     
     my $length_ali  = $linstruct->get_structlength(); # full width, including gaps
-    my $elemIndex   = $linstruct->get_elemsByIds();       # hash to locate info for each elem
-    my $ac_elem     = $elemIndex->{"$ac_ID"}              # the element for the anticodon
+    my $elemIndex   = $linstruct->get_elemsByIds();   # hash to locate info for each elem
+    my $ac_elem     = $elemIndex->{"$ac_ID"}          # the element for the anticodon
         or die "Cannot find element '$ac_ID' for anticodon in structure?!?\n";
     my $ac_offset   = $ac_elem->get_startposL();
     my $rac_offset  = $length_ali-$ac_offset-3;  # reverse offset
@@ -1754,15 +1773,11 @@ sub RemoveAlignment {
                         $evalue_j = "1e-100" if $evalue_j =~ m/^([\+\-]?)([\d\.]*)(?:e([\+\-]?00))?$/x;
                         my $iHaveBetterEvalue =  &CompareHighPrecisionFloats($evalue_i,$evalue_j) == -1  ? 1 : 0;
                         # Keep result with better evalue
-                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_j\n\n" if $iHaveBetterEvalue == 0;
-                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_i\n\n" if $iHaveBetterEvalue == 1;
                         splice(@$ali_block_i, $i_ali, 1) if $iHaveBetterEvalue == 0; # splice i
                         splice(@$ali_block_j, $j_ali, 1) if $iHaveBetterEvalue == 1; # splice j
                     }
                     else {
                         # Keep result with better evalue
-                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_j\n\n" if $jIni;
-                        print "head_i : $headL_i\nhead_j : $headL_j\nchoose : $headL_i\n\n" if $iInj;
                         splice(@$ali_block_j, $j_ali, 1) if $jIni; # splice i
                         splice(@$ali_block_i, $i_ali, 1) if $iInj; # splice j
                     }
@@ -1775,7 +1790,7 @@ sub RemoveAlignment {
                               : $sub_block_i->set_Alignments([]) ;
     }
 }
-    
+
 sub CompareModBlock {
     my ($cp_arrayI,$cp_arrayJ) = @_;
     
@@ -1867,14 +1882,14 @@ sub CompareHighPrecisionFloats {
         unless $x =~ m/^([\+\-]?)             # sign
                         ([\d\.]*)             # significand
                         (?:e([\+\-]?\d*))?         # exponent
-                       $/x;
+                        $/x;
     my ($xsig,$xman,$xexp) = ($1,$2,$3);
 
     die "Unparsable number '$y'\n"
         unless $y =~ m/^([\+\-]?)             # sign
                         ([\d\.]*)             # significand
                         (?:e([\+\-]?\d*))?         # exponent
-                       $/x;
+                        $/x;
     my ($ysig,$yman,$yexp) = ($1,$2,$3);
 
     # Define missing optional components of number representation
@@ -1945,15 +1960,15 @@ sub CreateRNAPredictions {
             my $structure   = $sub_block->get_structure();
             my $consensus   = $sub_block->get_consensus();
             my $comment     = $sub_block->get_comment();
-           
+            
             my $RNAPredictionList = PirObject::RNAPredictionList->new();
-                        
+            
             my ($aliString,$logString,$csmString) 
                 = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket);
             my $predictlist = [];
             ($predictlist,$aliString,$logString,$csmString) 
                 = &AddInfoForeachAli($Alignments,$aliString,$logString,$csmString);
-           
+            
             $ali_str .= "\n\n$aliString";
             $log_str .= "\n\n$logString";
             $csm_str .= "\n\n$csmString";
@@ -1984,7 +1999,7 @@ sub CreateRNAPredictions {
     close (LOGFILE);
     close (CSMFILE);
     
-    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile);
+    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile) if !$CGI;
 }
 
 sub CreateHeadString {
@@ -2022,6 +2037,11 @@ sub AddInfoForeachAli {
         my $RNAPrediction = PirObject::RNAPrediction->new();
         my $HeadForAli    = $ali->get_HeadForAli();
         my $AliForAli     = $ali->get_AliForAli();
+        my @HeadForAli_elems = split(/ /,$HeadForAli);
+        my $last_elem     = $HeadForAli_elems[-1];
+        my @path_elems    = split(/\/+/,$last_elem);
+        my $last_elem_path = $path_elems[-1];
+        $HeadForAli       =~ s/$last_elem/$last_elem_path/;
         $aliString       .= "$HeadForAli"."$AliForAli\n";
         my $HeadForLog    = $ali->get_HeadForLog();
         my $AliForLog     = $ali->get_AliForLog();
@@ -2118,8 +2138,24 @@ sub ListOfEmptySeq {
     $NoSol->close();
     
     system("cp","$TMP_DIR/NoSolution","./NoSolution");
-    print "\nList of sequences without solution in file: NoSolution\n";
-    
+    print "\nList of sequences without solution in file: NoSolution\n" if !$CGI;
+}
+
+sub sendMail {
+    my $filename = basename($DATAFILE);
+    my $msg = MIME::Lite->new(  From    => 'natabeck@gmail.com',
+                                To      => $MAIL_ADR,
+                                Subject => 'RNAfinder Result',
+                                Type    => 'multipart/mixed')
+                                or die "Error creating multipart container: $!\n";
+
+       $msg->attach(    Type        =>'AUTO',
+                        Path        => "$TMP_DIR/$filename.ali",
+                        Filename    => "$filename.ali",
+                        Disposition => 'attachment')
+                        or die "Error adding result file : $!\n";
+
+       $msg->send();
 }
 
 sub CopyResults {
@@ -2141,7 +2177,7 @@ sub CopyResults {
         my $outfh = &PrettyOutputStream("REPORT", $REPORTFILE);
         &CopyStream($infh,$outfh);
     }
-        
+    
     if ($XMLOUTFILE) {
         my $infh  = new IO::File "<$xmlFile"
             or die "Can't read back xml output file '$xmlFile': $!\n";
