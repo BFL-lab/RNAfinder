@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.19 2009/09/11 18:24:39 nbeck Exp $
+#    $Id: RNAfinder,v 1.20 2009/09/18 20:04:03 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.20  2009/09/18 20:04:03  nbeck
+#    Added function for CGI.
+#
 #    Revision 1.19  2009/09/11 18:24:39  nbeck
 #    Support for online version.
 #
@@ -115,7 +118,7 @@ use MIME::Lite;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.19 2009/09/11 18:24:39 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.20 2009/09/18 20:04:03 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -342,6 +345,7 @@ my $ALIGNEDOUTFILE = ""; # -A
 my $REPORTFILE     = ""; # -L
 my $XMLOUTFILE     = ""; # -X
 my $CUSTOMOUTFILE  = ""; # -C
+my $MAILCONTENT    = ""; # if -I 
 my $CSMOUTFILE_NOTDEF = 0;
 
 # Other
@@ -431,7 +435,7 @@ $SIG{'ALRM'} = \&SigCleanup;
 ##########################################################
 # Check Sequences file and define models directory       #
 ##########################################################
-my $TMP_DIR = $CGI ? "/services/WWW/cgi-bin/RNAweasel/UserFiles/$CGI/RNAweasel"
+my $TMP_DIR = $CGI ? "/services/WWW/cgi-bin/RNAweasel/UserFiles/$CGI"
                    : "/tmp/RNAfinder.$$";
 
 unless (-d $TMP_DIR) { mkdir($TMP_DIR,0777); }
@@ -478,7 +482,7 @@ my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &CreateRNAPredictions($AllErpinResult);
 &ScreenOutput($AllErpinResult);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
-&sendMail();
+&sendMail() if $CGI;
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG && !$CGI; 
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG && !$CGI;
 
@@ -1948,7 +1952,7 @@ sub CreateRNAPredictions {
     my $AllRNAPredictionList = [];
     my $nbTotRes   = 0;
     foreach my $block_name (keys %$AllResult) {
-        my $block      = $AllResult->{$block_name};
+        my $block      = $AllResult->{$block_name};        
         for(my $i = 0; $i < scalar(@$block); $i++) {
             my $sub_block   = $block->[$i];
             my $Alignments  = $sub_block->get_Alignments();
@@ -1963,15 +1967,15 @@ sub CreateRNAPredictions {
             
             my $RNAPredictionList = PirObject::RNAPredictionList->new();
             
-            my ($aliString,$logString,$csmString) 
-                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket);
+            my ($aliString,$logString,$csmString)
+                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i);
             my $predictlist = [];
             ($predictlist,$aliString,$logString,$csmString) 
                 = &AddInfoForeachAli($Alignments,$aliString,$logString,$csmString);
             
-            $ali_str .= "\n\n$aliString";
-            $log_str .= "\n\n$logString";
-            $csm_str .= "\n\n$csmString";
+            $ali_str .= "\n$aliString";
+            $log_str .= "\n$logString";
+            $csm_str .= "\n$csmString";
 
             $RNAPredictionList->set_Name($block_name);
             $RNAPredictionList->set_NumItem($numItem);
@@ -2003,14 +2007,29 @@ sub CreateRNAPredictions {
 }
 
 sub CreateHeadString {
-    my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket) = @_;
+    my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i) = @_;
     
-    my $headString .=  "\n*************************************************\n";
-    $headString .=  "Alignment for $block_name item $numItem\n";
-    $headString .=  "*************************************************\n\n";
-    $headString .=  "There are $nb_ali matches for $comment\n";
-    $headString .=  "Processing label: $label\n" if defined $label;
-    $headString .=  "\n";
+    my $headString = "";
+    if ($CGI != 0) {
+        if ($i == 0) {
+            $headString .=  "*************************************************\n";
+            $headString .=  "Alignment for $block_name\n";
+            $headString .=  "*************************************************\n\n";
+            $headString .=  "$nb_ali matches for $comment\n\n";
+        }
+        else {
+            $headString .=  "$nb_ali matches for $comment\n\n";
+        }
+    }
+    else {
+        $headString .=  "*************************************************\n";
+        $headString .=  "Alignment for $block_name item $numItem\n";
+        $headString .=  "*************************************************\n\n";
+        $headString .=  "There are $nb_ali matches for $comment\n";
+        $headString .=  "Processing label: $label\n" if defined $label;
+        $headString .=  "\n";
+    
+    }
     
     my $aliString = $headString;
     $aliString .= ">structure\n$structure";
@@ -2098,8 +2117,14 @@ sub AddInfoForeachAli {
 sub ScreenOutput {
     my $AllResult = shift;
     
+    my $filename = basename($DATAFILE);
+    my $MAILCONTENT = "$TMP_DIR/$filename.mail" if $CGI;
+    open(MAIL, ">$MAILCONTENT") or die ("Could not open MAILCONTENT file!\n") if $CGI;
+    
     my $nbTotRes   = 0;
     printf("\n%-25s %15s %15s \n%-25s %15s %15s", "","Initial #","Retained #","","of solution","of solution");
+    my $mail_str .= "<PRE><FONT face='Comic Sans MS' size=4>" if $CGI;
+       $mail_str .= sprintf("<br>%-25s %15s \n%-25s %15s", "","Retained #","","of solution") if $CGI;
     
     foreach my $block_name (keys %$AllResult) {
         my $block      = $AllResult->{$block_name};
@@ -2117,9 +2142,14 @@ sub ScreenOutput {
             $nbTotRes     += $nbRetSol;
             $nbOriSol = 0 if !$nbOriSol;
             printf("\n%-25.20s %15s %15s %15s", "$comment","$nbOriSol","$nbRetSol","$time");
+            $mail_str .= sprintf("<br>%-25.20s %15s", "$comment","$nbRetSol") if $CGI;
         }
     }
     printf("\n%-25s %15s %15s\n", "Total","","$nbTotRes");
+    $mail_str .= sprintf("<br>%-25s %15s\n", "Total","$nbTotRes") if $CGI;
+    $mail_str .= "</FONT></PRE>"if $CGI;
+    print MAIL $mail_str;
+    close(MAIL) if $CGI;
 }
 
 sub ListOfEmptySeq {
@@ -2143,16 +2173,25 @@ sub ListOfEmptySeq {
 
 sub sendMail {
     my $filename = basename($DATAFILE);
-    my $msg = MIME::Lite->new(  From    => 'natabeck@gmail.com',
+    
+    my $msg = MIME::Lite->new(  From    => 'rnaweasel@gmail.com',
                                 To      => $MAIL_ADR,
-                                Subject => 'RNAfinder Result',
+                                Subject => "RNAweasel Result for $MODELNAME on $filename",
                                 Type    => 'multipart/mixed')
                                 or die "Error creating multipart container: $!\n";
-
-       $msg->attach(    Type        =>'AUTO',
+                                
+      $msg->attach(     Type        => 'text/html; charset="iso-8859-1"',
+                        Path        => "$TMP_DIR/$filename.mail",
+                        Filename    => "$filename.mail",
+                        Disposition => 'inline',
+                        Encoding    => 'quoted-printable')
+                        or die "Error adding mail file : $!\n";
+       
+       $msg->attach(    Type        =>'text/plain',
                         Path        => "$TMP_DIR/$filename.ali",
                         Filename    => "$filename.ali",
-                        Disposition => 'attachment')
+                        Disposition => 'attachment',
+                        Encoding    => 'quoted-printable')
                         or die "Error adding result file : $!\n";
 
        $msg->send();
