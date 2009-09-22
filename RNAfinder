@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.20 2009/09/18 20:04:03 nbeck Exp $
+#    $Id: RNAfinder,v 1.21 2009/09/22 18:36:50 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.21  2009/09/22 18:36:50  nbeck
+#    Changed sendMail subroutine due to some problem with machine without sendmail.
+#
 #    Revision 1.20  2009/09/18 20:04:03  nbeck
 #    Added function for CGI.
 #
@@ -112,13 +115,12 @@ use Bio::Tools::CodonTable;
 use vars qw( $VERSION $RCS_VERSION );
 use lib    ( "./lib" );
 use POSIX qw{strftime};
-use MIME::Lite;
 
 # Default umask
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.20 2009/09/18 20:04:03 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.21 2009/09/22 18:36:50 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -435,6 +437,7 @@ $SIG{'ALRM'} = \&SigCleanup;
 ##########################################################
 # Check Sequences file and define models directory       #
 ##########################################################
+
 my $TMP_DIR = $CGI ? "/services/WWW/cgi-bin/RNAweasel/UserFiles/$CGI"
                    : "/tmp/RNAfinder.$$";
 
@@ -2148,7 +2151,7 @@ sub ScreenOutput {
     printf("\n%-25s %15s %15s\n", "Total","","$nbTotRes");
     $mail_str .= sprintf("<br>%-25s %15s\n", "Total","$nbTotRes") if $CGI;
     $mail_str .= "</FONT></PRE>"if $CGI;
-    print MAIL $mail_str;
+    print MAIL $mail_str if $CGI;
     close(MAIL) if $CGI;
 }
 
@@ -2167,34 +2170,22 @@ sub ListOfEmptySeq {
     
     $NoSol->close();
     
-    system("cp","$TMP_DIR/NoSolution","./NoSolution");
+    system("cp","$TMP_DIR/NoSolution","./NoSolution") if !$CGI;
     print "\nList of sequences without solution in file: NoSolution\n" if !$CGI;
 }
 
 sub sendMail {
     my $filename = basename($DATAFILE);
-    
-    my $msg = MIME::Lite->new(  From    => 'rnaweasel@gmail.com',
-                                To      => $MAIL_ADR,
-                                Subject => "RNAweasel Result for $MODELNAME on $filename",
-                                Type    => 'multipart/mixed')
-                                or die "Error creating multipart container: $!\n";
-                                
-      $msg->attach(     Type        => 'text/html; charset="iso-8859-1"',
-                        Path        => "$TMP_DIR/$filename.mail",
-                        Filename    => "$filename.mail",
-                        Disposition => 'inline',
-                        Encoding    => 'quoted-printable')
-                        or die "Error adding mail file : $!\n";
-       
-       $msg->attach(    Type        =>'text/plain',
-                        Path        => "$TMP_DIR/$filename.ali",
-                        Filename    => "$filename.ali",
-                        Disposition => 'attachment',
-                        Encoding    => 'quoted-printable')
-                        or die "Error adding result file : $!\n";
 
-       $msg->send();
+    my $sendmail = "perl /share/supported/bin/SendMAilPerl";
+    my $subject  = "RNAweasel Result for $MODELNAME on $filename";
+    my $sendmail_cmd = "$sendmail  -g \"rnaweasel\@gmail.com|$MAIL_ADR|$subject|multipart/mixed\" -a \"text/html; charset=\"iso-8859-1\"|$TMP_DIR/$filename.mail|$filename.mail|inline|quoted-printable|text/plain|$TMP_DIR/$filename.ali|$filename.ali|attachment|quoted-printable\"";
+        
+    my $ret = system("$sendmail_cmd");
+
+    if (($ret >> 8) > 1) {
+        print STDERR "There was an error running 'sendmail'.\n";
+    }
 }
 
 sub CopyResults {
