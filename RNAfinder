@@ -29,9 +29,13 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.21 2009/09/22 18:36:50 nbeck Exp $
+#    $Id: RNAfinder,v 1.22 2009/09/30 15:41:40 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.22  2009/09/30 15:41:40  nbeck
+#    Go back to old version of sub SendMail.
+#    Removed CGI variable, and add -T option.
+#
 #    Revision 1.21  2009/09/22 18:36:50  nbeck
 #    Changed sendMail subroutine due to some problem with machine without sendmail.
 #
@@ -115,12 +119,15 @@ use Bio::Tools::CodonTable;
 use vars qw( $VERSION $RCS_VERSION );
 use lib    ( "./lib" );
 use POSIX qw{strftime};
+eval "use MIME::Lite;";
+print STDERR "Warning: MIME::Lite not loaded.\n" if $@;
+my $MimeLite = $@ ? 0 : 1;
 
 # Default umask
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.21 2009/09/22 18:36:50 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.22 2009/09/30 15:41:40 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -232,7 +239,7 @@ Other options:
 -P               Used to define the number of processor.
                  Default RNAfinder look at the number of processor.
                  
--I               Only used by the web version in order to give PID.
+-T               Define the temporary work directory.
 
 -a               Mail address in order to send result by mail.
 
@@ -338,7 +345,6 @@ my $GENETICCODE = ""; # -c
 my $DEBUG       = 0;  # -D
 my $LIST        = 0;  # -l
 my $PARALLELISM = 0;  # -P
-my $CGI         = 0;  # -I
 my $MAIL_ADR    = ""; # -a 
 
 # Output options
@@ -347,7 +353,7 @@ my $ALIGNEDOUTFILE = ""; # -A
 my $REPORTFILE     = ""; # -L
 my $XMLOUTFILE     = ""; # -X
 my $CUSTOMOUTFILE  = ""; # -C
-my $MAILCONTENT    = ""; # if -I 
+my $TMP_DIR        = "/tmp/RNAfinder.$$"; # -T
 my $CSMOUTFILE_NOTDEF = 0;
 
 # Other
@@ -362,11 +368,11 @@ my $TOTALSTART    = time;
 
 for (;@ARGV;) {
     # Add in the regex [] ALL single-character command-line options
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([adcmlALXCPDI]|pc)(.*)$/);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([adcmlALXCPDT]|pc)(.*)$/);
     last if ! defined $opt;
     # Add in regex [] ONLY single-character options that
     # REQUIRE an argument, except for the 'd' debug switch.
-    if ($opt =~ /[adcmlALXCPI]|pc/ && $arg eq "") {
+    if ($opt =~ /[adcmlALXCPT]|pc/ && $arg eq "") {
         if (@ARGV < 2) {
             print "Argument required for option \"$opt\".\n";
             exit 1;
@@ -386,12 +392,10 @@ for (;@ARGV;) {
     $XMLOUTFILE     = $arg              if $opt eq 'X';
     $CUSTOMOUTFILE  = $arg              if $opt eq 'C';
     $DEBUG          = ($arg ? $arg : 1) if $opt eq 'D';
-    $CGI            = $arg              if $opt eq 'I';
+    $TMP_DIR        = $arg              if $opt eq 'T';
     $PARALLELISM    = $arg              if $opt eq 'P';
     shift;
 }
-
-umask 000 if $CGI;
 
 if ($LIST) {
     die "Available value for -l is 1 or 2!\n" 
@@ -420,6 +424,9 @@ if (     $ALIGNEDOUTFILE eq "" && $REPORTFILE    eq ""
       $CSMOUTFILE_NOTDEF = 1;
 }
 
+die "Option -a can't be used on this computer due to problem with Mime::Lite.\n"
+    if !$MimeLite && $MAIL_ADR;
+
 ################
 # Trap Signals #
 ################
@@ -437,9 +444,6 @@ $SIG{'ALRM'} = \&SigCleanup;
 ##########################################################
 # Check Sequences file and define models directory       #
 ##########################################################
-
-my $TMP_DIR = $CGI ? "/services/WWW/cgi-bin/RNAweasel/UserFiles/$CGI"
-                   : "/tmp/RNAfinder.$$";
 
 unless (-d $TMP_DIR) { mkdir($TMP_DIR,0777); }
 
@@ -472,7 +476,7 @@ if (defined($POURCENTISDEF)) {
 ########
 
 # Create non-redundant versions of the genome file.
-my $NB_PROC   = $CGI ? 2 : &DefineNumberOfProcessor();
+my $NB_PROC   = &DefineNumberOfProcessor();
 $PARALLELISM  = $NB_PROC if !$PARALLELISM;
 if ($PARALLELISM > $NB_PROC) {
    print "This computer have only $NB_PROC processor, used all processor\n";
@@ -485,13 +489,20 @@ my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &CreateRNAPredictions($AllErpinResult);
 &ScreenOutput($AllErpinResult);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
-&sendMail() if $CGI;
-print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG && !$CGI; 
-system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG && !$CGI;
+&sendMail() if $MAIL_ADR;
+print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
+system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
 
 #End of the script
 printf("%-49s", "Finished");
 print strftime("\%H:\%M:\%S", gmtime(time-$TOTALSTART))."\n";
+if (-d $TMP_DIR){
+my $filename = basename($DATAFILE);
+rename("$TMP_DIR/$filename.log.tmp","$TMP_DIR/$filename.log");
+rename("$TMP_DIR/$filename.csm.tmp","$TMP_DIR/$filename.csm");
+rename("$TMP_DIR/$filename.xml.tmp","$TMP_DIR/$filename.xml");
+rename("$TMP_DIR/$filename.ali.tmp","$TMP_DIR/$filename.ali");
+}
 exit(0);
 
 #############################
@@ -597,6 +608,8 @@ sub CopyWithoutDuplicates {
 
         # Header line.
         my $newid = $1; # from regex above
+           $newid = substr($newid,0,57) if length($newid) > 57 && !$byseq;
+
 
         # Dump previous record if needed
         my $isdupl = 0;
@@ -656,8 +669,8 @@ sub CopyWithoutDuplicates {
     
     if ($options !~ /byseq/i) {
         my $outfile_basename = basename("${outfile}.RemoveSeqName");
-        system("cp","${outfile}.RemoveSeqName","./RemoveSeqName");
-        print "\nList of duplicates removed from target sequences: RemoveSeqName\n" if !$CGI;
+        system("cp","${outfile}.RemoveSeqName","./RemoveSeqName") if !$MAIL_ADR;
+        print "\nList of duplicates removed from target sequences: RemoveSeqName\n" if !$MAIL_ADR;
     }
     return(\ %IdToSeq) if $returnhash;
     1;
@@ -854,14 +867,13 @@ sub RunErpinForAllItems {
         
         $erpinArg =~ s/"//g;        
         my $ret = "";
-        my $erpin = $CGI ? "/share/supported/bin/erpin" : "erpin";
         if (defined($cutoff)) {
-            print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr\n" if $DEBUG;
-            $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr\n" if $DEBUG;
+            $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
         }
         else {
-            print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr\n" if $DEBUG;
-            $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+            print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr\n" if $DEBUG;
+            $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
         }
         
         if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
@@ -920,14 +932,13 @@ sub RunErpin {
     print STDERR "Running erpin for item $Item_num...\n" if $Item_num;
     
     my $ret = "";
-    my $erpin = $CGI ? "/share/supported/bin/erpin" : "erpin";
     if (defined($cutoff)) {
-        print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
-        $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
+        print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff\n" if $DEBUG;
+        $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg -cutoff $cutoff > $erpinOut 2> $erpinErr");
     }
     else {
-        print STDERR "nice -19 $erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
-        $ret = system("nice -19 $erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
+        print STDERR "nice -19 erpin $nr_model $nr_genome $erpinArg\n" if $DEBUG;
+        $ret = system("nice -19 erpin $nr_model $nr_genome $erpinArg > $erpinOut 2> $erpinErr");
     }
     
     if (($ret >> 8) > 1 || (-s "$erpinOut" == 0) ) {
@@ -1937,19 +1948,19 @@ sub CreateRNAPredictions {
     my $AllResult = shift;
     
     my $filename = basename($DATAFILE);
-    my $aliFile = "$TMP_DIR/$filename.ali";
-    my $logFile = "$TMP_DIR/$filename.log";
-    my $csmFile = "$TMP_DIR/$filename.csm";
-    my $xmlFile = "$TMP_DIR/$filename.xml";
+    my $aliFile = "$TMP_DIR/$filename.ali.tmp";
+    my $logFile = "$TMP_DIR/$filename.log.tmp";
+    my $csmFile = "$TMP_DIR/$filename.csm.tmp";
+    my $xmlFile = "$TMP_DIR/$filename.xml.tmp";
     
     open (ALIFILE, ">>$aliFile")
-        or die "Can't write to .ali file '$aliFile': $!\n";
+        or die "Can't write to .ali.tmp file '$aliFile': $!\n";
     open (LOGFILE, ">>$logFile")
-        or die "Can't write to .log file '$logFile': $!\n";
+        or die "Can't write to .log.tmp file '$logFile': $!\n";
     open (CSMFILE, ">>$csmFile")
-        or die "Can't write to .csm file '$csmFile': $!\n";
+        or die "Can't write to .csm.tmp file '$csmFile': $!\n";
 
-    # Treat .ali .log and .ali .csm
+    # Treat .ali.tmp .log.tmp and .ali.tmp .csm.tmp
     my ($ali_str,$log_str,$csm_str) = ("","","");
     my $AllRNAPred = [];
     my $AllRNAPredictionList = [];
@@ -2006,14 +2017,14 @@ sub CreateRNAPredictions {
     close (LOGFILE);
     close (CSMFILE);
     
-    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile) if !$CGI;
+    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile) if !$MAIL_ADR;
 }
 
 sub CreateHeadString {
     my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i) = @_;
     
     my $headString = "";
-    if ($CGI != 0) {
+    if (defined($MAIL_ADR)) {
         if ($i == 0) {
             $headString .=  "*************************************************\n";
             $headString .=  "Alignment for $block_name\n";
@@ -2121,13 +2132,13 @@ sub ScreenOutput {
     my $AllResult = shift;
     
     my $filename = basename($DATAFILE);
-    my $MAILCONTENT = "$TMP_DIR/$filename.mail" if $CGI;
-    open(MAIL, ">$MAILCONTENT") or die ("Could not open MAILCONTENT file!\n") if $CGI;
+    my $mail_content = "$TMP_DIR/$filename.mail" if $MAIL_ADR;
+    open(MAIL, ">$mail_content") or die ("Could not open $mail_content file!\n") if $MAIL_ADR;
     
     my $nbTotRes   = 0;
     printf("\n%-25s %15s %15s \n%-25s %15s %15s", "","Initial #","Retained #","","of solution","of solution");
-    my $mail_str .= "<PRE><FONT face='Comic Sans MS' size=4>" if $CGI;
-       $mail_str .= sprintf("<br>%-25s %15s \n%-25s %15s", "","Retained #","","of solution") if $CGI;
+    my $mail_str .= "<PRE><FONT face='courier' size=4>" if $MAIL_ADR;
+       $mail_str .= sprintf("<br>%-25s %15s \n%-25s %15s", "","Retained #","","of solution") if $MAIL_ADR;
     
     foreach my $block_name (keys %$AllResult) {
         my $block      = $AllResult->{$block_name};
@@ -2145,14 +2156,14 @@ sub ScreenOutput {
             $nbTotRes     += $nbRetSol;
             $nbOriSol = 0 if !$nbOriSol;
             printf("\n%-25.20s %15s %15s %15s", "$comment","$nbOriSol","$nbRetSol","$time");
-            $mail_str .= sprintf("<br>%-25.20s %15s", "$comment","$nbRetSol") if $CGI;
+            $mail_str .= sprintf("<br>%-25.20s %15s", "$comment","$nbRetSol") if $MAIL_ADR;
         }
     }
     printf("\n%-25s %15s %15s\n", "Total","","$nbTotRes");
-    $mail_str .= sprintf("<br>%-25s %15s\n", "Total","$nbTotRes") if $CGI;
-    $mail_str .= "</FONT></PRE>"if $CGI;
-    print MAIL $mail_str if $CGI;
-    close(MAIL) if $CGI;
+    $mail_str .= sprintf("<br>%-25s %15s\n", "Total","$nbTotRes") if $MAIL_ADR;
+    $mail_str .= "</FONT></PRE>"if $MAIL_ADR;
+    print MAIL $mail_str if $MAIL_ADR;
+    close(MAIL) if $MAIL_ADR;
 }
 
 sub ListOfEmptySeq {
@@ -2170,22 +2181,34 @@ sub ListOfEmptySeq {
     
     $NoSol->close();
     
-    system("cp","$TMP_DIR/NoSolution","./NoSolution") if !$CGI;
-    print "\nList of sequences without solution in file: NoSolution\n" if !$CGI;
+    system("cp","$TMP_DIR/NoSolution","./NoSolution") if !$MAIL_ADR;
+    print "\nList of sequences without solution in file: NoSolution\n" if !$MAIL_ADR;
 }
 
 sub sendMail {
     my $filename = basename($DATAFILE);
+    
+    my $msg = MIME::Lite->new(  From    => 'rnaweasel@gmail.com',
+                                To      => $MAIL_ADR,
+                                Subject => "RNAweasel Result for $MODELNAME on $filename",
+                                Type    => 'multipart/mixed')
+                                or die "Error creating multipart container: $!\n";
+                                
+      $msg->attach(     Type        => 'text/html; charset="iso-8859-1"',
+                        Path        => "$TMP_DIR/$filename.mail",
+                        Filename    => "$filename.mail",
+                        Disposition => 'inline',
+                        Encoding    => 'quoted-printable')
+                        or die "Error adding mail file : $!\n";
+       
+       $msg->attach(    Type        =>'text/plain',
+                        Path        => "$TMP_DIR/$filename.ali.tmp",
+                        Filename    => "$filename.ali",
+                        Disposition => 'attachment',
+                        Encoding    => 'quoted-printable')
+                        or die "Error adding result file : $!\n";
 
-    my $sendmail = "perl /share/supported/bin/SendMAilPerl";
-    my $subject  = "RNAweasel Result for $MODELNAME on $filename";
-    my $sendmail_cmd = "$sendmail  -g \"rnaweasel\@gmail.com|$MAIL_ADR|$subject|multipart/mixed\" -a \"text/html; charset=\"iso-8859-1\"|$TMP_DIR/$filename.mail|$filename.mail|inline|quoted-printable|text/plain|$TMP_DIR/$filename.ali|$filename.ali|attachment|quoted-printable\"";
-        
-    my $ret = system("$sendmail_cmd");
-
-    if (($ret >> 8) > 1) {
-        print STDERR "There was an error running 'sendmail'.\n";
-    }
+       $msg->send();
 }
 
 sub CopyResults {
