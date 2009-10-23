@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.23 2009/10/22 17:53:45 nbeck Exp $
+#    $Id: RNAfinder,v 1.24 2009/10/23 18:10:45 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.24  2009/10/23 18:10:45  nbeck
+#    Used gmail SMTP.
+#
 #    Revision 1.23  2009/10/22 17:53:45  nbeck
 #    Fixed smtp problem.
 #
@@ -122,15 +125,13 @@ use Bio::Tools::CodonTable;
 use vars qw( $VERSION $RCS_VERSION );
 use lib    ( "./lib" );
 use POSIX qw{strftime};
-eval "use MIME::Lite;";
-print STDERR "Warning: MIME::Lite not loaded.\n" if $@;
-my $MimeLite = $@ ? 0 : 1;
+use Sys::Hostname;
 
 # Default umask
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.23 2009/10/22 17:53:45 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.24 2009/10/23 18:10:45 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -427,8 +428,12 @@ if (     $ALIGNEDOUTFILE eq "" && $REPORTFILE    eq ""
       $CSMOUTFILE_NOTDEF = 1;
 }
 
-die "Option -a can't be used on this computer due to problem with Mime::Lite.\n"
-    if !$MimeLite && $MAIL_ADR;
+my @AF_HOSTS= qw( megasuno.bcm.umontreal.ca
+                  megasuno);
+if ($MAIL_ADR) {
+die "RNAfinder can only run with -a option on : megasuno"
+    unless scalar(grep( $_ eq hostname(), @AF_HOSTS));
+}
 
 ################
 # Trap Signals #
@@ -2191,27 +2196,21 @@ sub ListOfEmptySeq {
 sub sendMail {
     my $filename = basename($DATAFILE);
     
-    my $msg = MIME::Lite->new(  From    => 'rnaweasel@gmail.com',
-                                To      => $MAIL_ADR,
-                                Subject => "RNAweasel Result for $MODELNAME on $filename",
-                                Type    => 'multipart/mixed')
-                                or die "Error creating multipart container: $!\n";
-                                
-      $msg->attach(     Type        => 'text/html; charset="iso-8859-1"',
-                        Path        => "$TMP_DIR/$filename.mail",
-                        Filename    => "$filename.mail",
-                        Disposition => 'inline',
-                        Encoding    => 'quoted-printable')
-                        or die "Error adding mail file : $!\n";
-       
-       $msg->attach(    Type        =>'text/plain',
-                        Path        => "$TMP_DIR/$filename.ali.tmp",
-                        Filename    => "$filename.ali",
-                        Disposition => 'attachment',
-                        Encoding    => 'quoted-printable')
-                        or die "Error adding result file : $!\n";
-
-       $msg->send_by_smtp('mail3.bcm.umontreal.ca');
+	my $subject   = "RNAweasel Result for $MODELNAME on $filename";
+	my $mail_file = "$TMP_DIR/$filename.mail";
+	my $ali_file  = "$TMP_DIR/$filename.ali.tmp";
+	my $mailErr   = "$TMP_DIR/mailErr";
+	my $mailOut   = "$TMP_DIR/mailOut";
+	
+    my $cmd = "perl /services/WWW/cgi-bin/RNAweasel/bin/sendmail.pl -f \'rnaweasel\@gmail.com\' -t \'$MAIL_ADR\' -s \'$subject\' -a \'$mail_file , $ali_file\'";
+	print STDERR $cmd if $DEBUG;
+	my $ret = system("$cmd 2> $mailErr");
+	
+	if (($ret >> 8) > 1) {
+		print STDERR "There was an error sending mail.\n";
+		print STDERR "Content of STDERR output:\n";
+		system("cat",$mailErr);
+	}
 }
 
 sub CopyResults {
