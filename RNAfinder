@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.24 2009/10/23 18:10:45 nbeck Exp $
+#    $Id: RNAfinder,v 1.25 2009/10/26 21:20:30 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.25  2009/10/26 21:20:30  nbeck
+#    Added new output format and fixed some bugs for results selection.
+#
 #    Revision 1.24  2009/10/23 18:10:45  nbeck
 #    Used gmail SMTP.
 #
@@ -117,7 +120,7 @@ require 5.00;
 use strict;
 use Term::ANSIColor qw(:constants);
 $Term::ANSIColor::AUTORESET = 1;
-use PirObject qw( LinStruct RNAPredictionList RNAfinderFileForMenu AllerpinResult);
+use PirObject qw( LinStruct RNAPredictionList RNAfinderFileForMenu AllerpinResult AnnotPairCollection);
 use IO::File;
 use File::Basename;
 use Cwd;
@@ -131,7 +134,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.24 2009/10/23 18:10:45 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.25 2009/10/26 21:20:30 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -218,7 +221,7 @@ Input data options:
                  
 Output report options:
 ----------------------
-4 different reports can be created by this program, you can ask any or all of them to be created.
+5 different reports can be created by this program, you can ask any or all of them to be created.
 Default output option is -C, the output file will be named 'fastagenome' + ".csm".
 
 -A alignedOut    Is a concatenation of results in the same format 
@@ -232,6 +235,8 @@ Default output option is -C, the output file will be named 'fastagenome' + ".csm
 
 -C customOut     Is a simple text output. The RNA information is the same as the one produced
                  by the -X option.
+                 
+-M ApcOut        This is a file containing a list of AnnotPair (AnnotPairCollection) for MFannot.
 
 Other options:
 --------------
@@ -248,6 +253,8 @@ Other options:
 -a               Mail address in order to send result by mail.
 
 -pc              Percentage of cutoff values defined by erpin.
+
+-r               Removing duplicated sequences in data file.
 USAGE
 exit 1;
 }
@@ -357,6 +364,8 @@ my $ALIGNEDOUTFILE = ""; # -A
 my $REPORTFILE     = ""; # -L
 my $XMLOUTFILE     = ""; # -X
 my $CUSTOMOUTFILE  = ""; # -C
+my $APCOUTFILE     = ""; # -M
+my $REMOVEINTAR    = ""; # -r
 my $TMP_DIR        = "/tmp/RNAfinder.$$"; # -T
 my $CSMOUTFILE_NOTDEF = 0;
 
@@ -372,11 +381,11 @@ my $TOTALSTART    = time;
 
 for (;@ARGV;) {
     # Add in the regex [] ALL single-character command-line options
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([adcmlALXCPDT]|pc)(.*)$/);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([adcmlrALXCMPDT]|pc)(.*)$/);
     last if ! defined $opt;
     # Add in regex [] ONLY single-character options that
     # REQUIRE an argument, except for the 'd' debug switch.
-    if ($opt =~ /[adcmlALXCPT]|pc/ && $arg eq "") {
+    if ($opt =~ /[adcmlALXCMPT]|pc/ && $arg eq "") { 
         if (@ARGV < 2) {
             print "Argument required for option \"$opt\".\n";
             exit 1;
@@ -395,7 +404,9 @@ for (;@ARGV;) {
     $REPORTFILE     = $arg              if $opt eq 'L';
     $XMLOUTFILE     = $arg              if $opt eq 'X';
     $CUSTOMOUTFILE  = $arg              if $opt eq 'C';
+    $APCOUTFILE     = $arg              if $opt eq 'M'; 
     $DEBUG          = ($arg ? $arg : 1) if $opt eq 'D';
+    $REMOVEINTAR    = ($arg ? $arg : 1) if $opt eq 'r';
     $TMP_DIR        = $arg              if $opt eq 'T';
     $PARALLELISM    = $arg              if $opt eq 'P';
     shift;
@@ -424,7 +435,8 @@ foreach my $arg (@NAME_LIST){
 
 &Usage if @ARGV > 0 || $DATAFILE eq "" || $MODELNAME eq "";
 if (     $ALIGNEDOUTFILE eq "" && $REPORTFILE    eq "" 
-      && $XMLOUTFILE     eq "" && $CUSTOMOUTFILE eq ""   ) {
+      && $XMLOUTFILE     eq "" && $CUSTOMOUTFILE eq "" 
+      && $APCOUTFILE eq "") {
       $CSMOUTFILE_NOTDEF = 1;
 }
 
@@ -509,6 +521,7 @@ my $filename = basename($DATAFILE);
 rename("$TMP_DIR/$filename.log.tmp","$TMP_DIR/$filename.log");
 rename("$TMP_DIR/$filename.csm.tmp","$TMP_DIR/$filename.csm");
 rename("$TMP_DIR/$filename.xml.tmp","$TMP_DIR/$filename.xml");
+rename("$TMP_DIR/$filename.apc.tmp","$TMP_DIR/$filename.apc");
 rename("$TMP_DIR/$filename.ali.tmp","$TMP_DIR/$filename.ali");
 }
 exit(0);
@@ -599,8 +612,8 @@ sub CopyWithoutDuplicates {
     my $id            = "";
     my $seq           = "";
     my $Interest_seq  = "";
+    my $nb_dupli      = 0;
     
-
     my %IdToSeq = (); # all seq data in a hash; returned if option ReturnHash is true
 
     while (my $line = <$infh>) {
@@ -618,7 +631,6 @@ sub CopyWithoutDuplicates {
         my $newid = $1; # from regex above
            $newid = substr($newid,0,57) if length($newid) > 57 && !$byseq;
 
-
         # Dump previous record if needed
         my $isdupl = 0;
         if (defined($byseq)) {
@@ -630,10 +642,16 @@ sub CopyWithoutDuplicates {
             ++$head_dup{$id} if $ID_seq{$id} && $ID_seq{$id} ne $seq;
         }
         
-        if ($isdupl) {
-            print STDERR "Ignored duplicated entry in '$infile': $id\n"   if $DEBUG  && $isdupl == 1;
-            print $cleanfh "$id\n" if $isdupl == 1;
-        } elsif ($id) { # if we have the previous seq in memory
+        if ($isdupl && ( $byseq || $REMOVEINTAR)) {
+            print STDERR "Ignored duplicated entry in '$infile': $id\n" if $DEBUG;
+            print $cleanfh "$id\n";
+        } 
+        elsif ($id) { # if we have the previous seq in memory
+            if ($isdupl && !$byseq ) { # Special case
+                print STDERR "Ignored duplicated entry in '$infile': $id\n" if $DEBUG;
+                print $cleanfh "$id\n";
+                $nb_dupli++;
+            }
             my $name_for_IdToSeq = !$head_dup{$id} ? $id : "$id ".$head_dup{$id};
             print $outfh ">$name_for_IdToSeq\n"; # cleaned header with simple ID
             print $outfh $seq                        if     $rawseq;
@@ -657,10 +675,15 @@ sub CopyWithoutDuplicates {
         ++$head_dup{$id} if $ID_seq{$id} && $ID_seq{$id} ne $seq;
     }
     
-    if ($isdupl) {
+    if ($isdupl && ($byseq || $REMOVEINTAR)) {
         print STDERR   "Ignored duplicated entry in '$infile': $id\n" if $DEBUG && $seenIds{$id} == 2;
         print $cleanfh "$id\n" if $seenIds{$id} == 2;
     } elsif ($id) { # if we have the previous seq in memory
+        if ($isdupl && !$byseq ) { # Special case
+            print STDERR "Ignored duplicated entry in '$infile': $id\n" if $DEBUG;
+            print $cleanfh "$id\n";
+            $nb_dupli++;
+        }
         my $name_for_IdToSeq = !$head_dup{$id} ? $id : "$id ".$head_dup{$id};
         print $outfh ">$name_for_IdToSeq\n"; # cleaned header with simple ID
         print $outfh $seq                        if     $rawseq;
@@ -677,8 +700,14 @@ sub CopyWithoutDuplicates {
     
     if ($options !~ /byseq/i) {
         my $outfile_basename = basename("${outfile}.RemoveSeqName");
-        system("cp","${outfile}.RemoveSeqName","./RemoveSeqName") if !$MAIL_ADR;
-        print "\nList of duplicates removed from target sequences: RemoveSeqName\n" if !$MAIL_ADR;
+        if (!$MAIL_ADR && $nb_dupli > 0 && !$REMOVEINTAR) {
+            system("cp","${outfile}.RemoveSeqName","./ListSeqName");
+            print "\nData present $nb_dupli duplicates, list of duplicates is in : ListSeqName\n";
+        }
+        if (!$MAIL_ADR && $REMOVEINTAR) {
+            system("cp","${outfile}.RemoveSeqName","./RemoveSeqName");
+            print "\nList of duplicates removed from target sequences: RemoveSeqName\n";
+        }
     }
     return(\ %IdToSeq) if $returnhash;
     1;
@@ -1178,8 +1207,7 @@ sub MakeModel {
                                    ? $suffixLen
                                    : $prefixLen;
 		
-		$HeadForAli .= sprintf(" %3s %s %6s:%6s %10s %s\n",
-			$aliNumber,
+		$HeadForAli .= sprintf(" %s %6s:%6s %10s %s\n",
 			$dir,
 			$start + $posAdjustLeft,
             $stop  + $posAdjustRight,
@@ -1755,6 +1783,7 @@ sub RemoveAlignment {
     
     for(my $i = 0; $i < scalar(@$block); $i++) {
         my $sub_block_i = $block->[$i];
+        my $label_i     = $sub_block_i->get_Label();
         my $ali_block_i = $sub_block_i->get_Alignments();
         
         # Reverse loop on ali_block i
@@ -1763,9 +1792,11 @@ sub RemoveAlignment {
             my ($start_i,$stop_i,$evalue_i) =
                ($ali_i->get_LogStart(),$ali_i->get_LogStop(),$ali_i->get_evalue());
             ($start_i, $stop_i) = ($stop_i, $start_i) if $stop_i < $start_i;
+            my $delete_i     = 0;
             
             for(my $j = $i+1; $j < scalar(@$block); $j++) {
-                my $sub_block_j  = $block->[$j];
+                my $sub_block_j = $block->[$j];
+                my $label_j     = $sub_block_j->get_Label();
                 my $cp_sub_block_i = $sub_block_i->DeepClone();
                 my $mod_block_i = $cp_sub_block_i->get_modTab();
                 
@@ -1778,8 +1809,10 @@ sub RemoveAlignment {
                 next if !$iInj && !$jIni && !$iIsj;
                 
                 my $ali_block_j  = $sub_block_j->get_Alignments();
+                
                 # Reverse loop on ali_block j
                 for (my $j_ali = @$ali_block_j-1 ; $j_ali >= 0 ; $j_ali--) {
+                    next if $delete_i == 1;
                     my $ali_j = $ali_block_j->[$j_ali];
                     
                     my $head_i = $ali_i->get_header();
@@ -1800,12 +1833,14 @@ sub RemoveAlignment {
                         my $iHaveBetterEvalue =  &CompareHighPrecisionFloats($evalue_i,$evalue_j) == -1  ? 1 : 0;
                         # Keep result with better evalue
                         splice(@$ali_block_i, $i_ali, 1) if $iHaveBetterEvalue == 0; # splice i
+                        $delete_i = 1 if $iHaveBetterEvalue == 0;
                         splice(@$ali_block_j, $j_ali, 1) if $iHaveBetterEvalue == 1; # splice j
                     }
                     else {
                         # Keep result with better evalue
-                        splice(@$ali_block_j, $j_ali, 1) if $jIni; # splice i
-                        splice(@$ali_block_i, $i_ali, 1) if $iInj; # splice j
+                        splice(@$ali_block_i, $i_ali, 1) if $iInj; # splice i
+                        $delete_i = 1 if $iInj;
+                        splice(@$ali_block_j, $j_ali, 1) if $jIni; # splice j
                     }
                 }
                 @$ali_block_j ? $sub_block_j->set_Alignments([@$ali_block_j])
@@ -1960,6 +1995,8 @@ sub CreateRNAPredictions {
     my $logFile = "$TMP_DIR/$filename.log.tmp";
     my $csmFile = "$TMP_DIR/$filename.csm.tmp";
     my $xmlFile = "$TMP_DIR/$filename.xml.tmp";
+    my $apcFile = "$TMP_DIR/$filename.apc.tmp";
+
     
     open (ALIFILE, ">>$aliFile")
         or die "Can't write to .ali.tmp file '$aliFile': $!\n";
@@ -1993,12 +2030,12 @@ sub CreateRNAPredictions {
                 = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i);
             my $predictlist = [];
             ($predictlist,$aliString,$logString,$csmString) 
-                = &AddInfoForeachAli($Alignments,$aliString,$logString,$csmString);
+                = &AddInfoForeachAli($Alignments,$aliString,$logString,$csmString,$block_name);
             
             $ali_str .= "\n$aliString";
             $log_str .= "\n$logString";
             $csm_str .= "\n$csmString";
-
+                        
             $RNAPredictionList->set_Name($block_name);
             $RNAPredictionList->set_NumItem($numItem);
             $RNAPredictionList->set_Label($label) if $label;
@@ -2011,6 +2048,8 @@ sub CreateRNAPredictions {
     print ALIFILE "$ali_str" if $ali_str;
     print LOGFILE "$log_str" if $log_str;
     print CSMFILE "$csm_str" if $csm_str;
+    
+    &CreateAPCFile($AllRNAPred,$apcFile);
     
     # Treat XML File.
     my $outfh = new IO::File ">$xmlFile"
@@ -2025,7 +2064,7 @@ sub CreateRNAPredictions {
     close (LOGFILE);
     close (CSMFILE);
     
-    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile) if !$MAIL_ADR;
+    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile,$apcFile) if !$MAIL_ADR;
 }
 
 sub CreateHeadString {
@@ -2071,7 +2110,7 @@ sub CreateHeadString {
 }
 
 sub AddInfoForeachAli {
-    my ($Alignments,$aliString,$logString,$csmString) = @_;
+    my ($Alignments,$aliString,$logString,$csmString,$block_name) = @_;
     
     my $predictlist = [];
     foreach my $ali (@$Alignments) {
@@ -2105,16 +2144,22 @@ sub AddInfoForeachAli {
             $RNAPrediction->set_strand($strand);
             $csmString .= "Strand:          $strand\n";
         }
-        my $AliStart   = $ali->get_AliStart();
-        if (defined($AliStart)) {
-            $RNAPrediction->set_start($AliStart);
-            $csmString .= "Start:           $AliStart\n";
+        my $Start   = $block_name eq "tRNA" ? $ali->get_AliStart() : $ali->get_LogStart();
+        if (defined($Start)) {
+            $RNAPrediction->set_start($Start);
+            $csmString .= "Start:           $Start\n";
         }
-        my $AliStop    = $ali->get_AliStop();
-        if (defined($AliStop)) {
-            $RNAPrediction->set_stop($AliStop);
-            $csmString .= "Stop:            $AliStop\n";
+        my $Stop    = $block_name eq "tRNA" ? $ali->get_AliStop() : $ali->get_LogStop();
+        if (defined($Stop)) { 
+            $RNAPrediction->set_stop($Stop);
+            $csmString .= "Stop:            $Stop\n";
         }
+        my $evalue     = $ali->get_evalue();
+        if (defined($evalue)) {
+            $RNAPrediction->set_evalue($evalue);
+            $csmString .= "Evalue :         $evalue\n";
+        }
+        
         my $AcStart    = $ali->get_AcStart();
         if (defined($AcStart)) {
             $RNAPrediction->set_anticodon_start($AcStart);
@@ -2134,6 +2179,123 @@ sub AddInfoForeachAli {
         push(@$predictlist,$RNAPrediction);
     }
     return ($predictlist,$aliString,$logString,$csmString);
+}
+
+sub CreateAPCFile {
+    my ($AllRNAPred,$apcFile) = @_;
+
+    open (APCFILE, ">>$apcFile")
+        or die "Can't write to .ali.tmp file '$apcFile': $!\n";
+        
+    my $apcString = "";
+    my $APC       = undef;
+    my $annot_by_contig = {};
+    my $combi = {};
+    my $count = 0; 
+    
+    foreach my $predList (@$AllRNAPred) {
+        my $name   = $predList->get_Name();
+        my $label  = $predList->get_Label();
+        my $rnapredictions = $predList->get_rnapredictions();
+        
+        foreach my $prediction (@$rnapredictions){
+            my ($annot,$annot_ac) = &CreateAnnotPair($prediction,$name,$label);
+            my $contig = $prediction->get_contigname();
+            
+            # Code hash in order to find contig name and genename
+            my $annotpairs = undef;
+            my $this_key = scalar(keys %$combi) == 0 ? 0 : undef ;
+            $combi->{$this_key} = [$name,$contig] if defined($this_key) && $this_key == 0;
+            my $contig_already_present = 0;
+            
+            
+            while ( my ($key, $name_cgname) = each(%$combi) ) {
+                if ($name_cgname->[0] eq $name && $name_cgname->[1] eq $contig ) {
+                    $contig_already_present = 1;
+                    $this_key   = $key;
+                    $annotpairs = $annot_by_contig->{$key}
+                }
+            }
+            if ($contig_already_present == 0) {
+                $count++;
+                $this_key = $count;
+                $combi->{$this_key} = [$name,$contig]
+            }
+            
+            push(@$annotpairs,$annot);
+            push(@$annotpairs,$annot_ac) if $annot_ac;
+            $annot_by_contig->{$this_key} = $annotpairs;
+        }
+    }
+    
+    while ( my ($key, $annotpairs) = each(%$annot_by_contig) ) {
+        my $name_cgname = $combi->{$key};
+        my ($name,$contig)   = ($name_cgname->[0],$name_cgname->[1]);
+        $APC = new PirObject::AnnotPairCollection();
+        $APC->set_genename($name);
+        $APC->set_contigname($contig);
+        $APC->set_annotpairlist($annotpairs);
+        my $xml_APC = $APC->ObjectToXML();
+        print APCFILE $xml_APC;
+    }
+    close (APCFILE);
+}
+
+sub CreateAnnotPair {
+    my ($prediction,$name,$label) = @_;
+    
+    my $aacode          = $prediction->get_aacode();
+    my $anticodon_seq   = $prediction->get_anticodon_seq() ;
+    my $anticodon_start = $prediction->get_anticodon_start();
+    my $anticodon_stop  = $prediction->get_anticodon_stop();
+    my $contigname      = $prediction->get_contigname();
+    my $evalue          = $prediction->get_evalue();
+    my $start           = $prediction->get_start();
+    my $stop            = $prediction->get_stop();
+    my $strand          = $prediction->get_strand();
+    
+    my $arrow = $strand eq "+" ? "==>" : "<=="  ;
+       ($start,$stop)        = ($stop,$start) if $strand eq "-";
+    my ($startline,$endline) = ("","");
+    
+    if ($name =~ m/tRNA/i) {
+        my $ac = lc($anticodon_seq);
+           $ac =~ tr/t/u/;
+        $name       = "trn$aacode";
+        $startline  = ";     G-trn${aacode}\($ac\) $arrow start";
+        $endline    = ";     G-trn${aacode}\($ac\) $arrow end";
+    }
+    elsif ($name =~ m/intron/i) {
+        $startline  = ";;     group=$label";
+        $endline    = ";;";
+        $name       = "comment";
+    }
+    else {
+        $startline  = ";     G-$name $arrow start";
+        $endline    = ";     G-$name $arrow end";
+    }
+    
+    my $annot      = new PirObject::AnnotPair (
+                         type      => "G", 
+                         genename  => $name, 
+                         startpos  => $start,
+                         endpos    => $stop,
+                         direction => $arrow,
+                         startline => $startline,
+                         endline   => $endline,
+                         score     => $evalue,
+                         idbyRNA   => 1
+                         );
+    my $annot_ac;
+    if ($name =~ m/tRN/i){                        
+     $annot_ac    = new PirObject::AnnotPair (
+                         type      => "AC", 
+                         genename  => "!anticodon!",
+                         startpos  => $anticodon_start,
+                         endpos    => $anticodon_stop
+                         );
+    }
+    return($annot,$annot_ac);
 }
 
 sub ScreenOutput {
@@ -2215,7 +2377,7 @@ sub sendMail {
 
 sub CopyResults {
     # Copy results to user's selected output files
-    my ($aliFile,$logFile,$csmFile,$xmlFile) = @_;
+    my ($aliFile,$logFile,$csmFile,$xmlFile,$apcFile) = @_;
     
     $CUSTOMOUTFILE = "${DATAFILE}_${LIST_OF_SEARCHED}.csm" if $CSMOUTFILE_NOTDEF;
     
@@ -2244,6 +2406,13 @@ sub CopyResults {
         my $infh  = new IO::File "<$csmFile"
             or die "Can't read back report output file '$csmFile': $!\n";
         my $outfh = &PrettyOutputStream("CUSTOM", $CUSTOMOUTFILE);
+        &CopyStream($infh,$outfh);
+    }
+    
+    if ($APCOUTFILE) {
+        my $infh  = new IO::File "<$apcFile"
+            or die "Can't read back report output file '$apcFile': $!\n";
+        my $outfh = &PrettyOutputStream("APC", $APCOUTFILE);
         &CopyStream($infh,$outfh);
     }
 }
