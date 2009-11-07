@@ -19,9 +19,12 @@
 #       pos_ac = "13"
 # Between "Item" and "EndItem" if the anticodon is the 13 element of the model.
 #
-# $Id: RNAfinderFileForMenu.pir,v 1.3 2009/08/06 21:03:05 nbeck Exp $
+# $Id: RNAfinderFileForMenu.pir,v 1.4 2009/11/07 00:21:40 nbeck Exp $
 #
 # $Log: RNAfinderFileForMenu.pir,v $
+# Revision 1.4  2009/11/07 00:21:40  nbeck
+# Changed output format.
+#
 # Revision 1.3  2009/08/06 21:03:05  nbeck
 # Fixed conflicts in RNAfinderFileForMenu.pir MenuList.pir
 #
@@ -45,20 +48,23 @@ List           	        array	        <MenuList>      Menu list
 - EndFieldsTable
 - Methods
 
-our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.3 2009/08/06 21:03:05 nbeck Exp $';
+our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.4 2009/11/07 00:21:40 nbeck Exp $';
 our ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 
 # Sample format of text file
 #
 # Used for identification of tRNA
-#Name = tRNA
-#
-#   Item
-#       erpin_arg  = "-1,19 -add 1 17 18 -add 11 12 14 -add 2 3 5 7 -logzero -5 -cutoff 2.9 8 30"
-#       model_name = tRNA.epn
-#       pos_ac     = 13
-#       comment    = ""
-#   EndItem
+# Name    = tRNA
+# comment = tRNA_model
+# order   = 1
+# 
+# Item
+#     erpin_arg  = "-1,19 -add 1 17 18 -add 11 12 14 -add 2 3 5 7 -logzero -5"
+#     cutoff     = 2.9 8 30
+#     model_file = tRNA.epn
+#     pos_ac     = 13
+#     comment    = tRNA
+# EndItem
 #
 
 sub ImportFromTextFile {
@@ -90,6 +96,7 @@ sub ImportFromTextFile {
         die "Error: genename '$name' line '$count_line' seen more than once in file '$filename'.\n"
             if exists $MenuList->{lc($name)};
         
+        # Expects "comment" 
         while (@file && $file[0] =~ m/^\s*$|^\s*#/){
                 shift(@file);
                 $count_line++;
@@ -98,13 +105,24 @@ sub ImportFromTextFile {
             if ($file[0] !~ m/^\s*comment?\s*=\s*(\w+)\s*$/i);
         my $ModelComment = $1;
         shift(@file);
+        
+        # Expect "order" 
+        while (@file && $file[0] =~ m/^\s*$|^\s*#/){
+                shift(@file);
+                $count_line++;
+        }
+        die "Error: unparsable line '$count_line' in '$filename' (expected \"order=\"), got:\n$line"
+            if ($file[0] !~ m/^\s*order?\s*=\s*(\w+)\s*$/i);
+        my $Order = $1;
+        shift(@file);
         $count_line++;
 
         
         my $List = new PirObject::MenuList(
             Set     => {},
             OriName => $name,
-            Comment => $ModelComment
+            Comment => $ModelComment,
+            Order   => $Order
         );
         
         my $ItemSet = $List->get_Set();

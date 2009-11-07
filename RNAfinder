@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.25 2009/10/26 21:20:30 nbeck Exp $
+#    $Id: RNAfinder,v 1.26 2009/11/07 00:21:40 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.26  2009/11/07 00:21:40  nbeck
+#    Changed output format.
+#
 #    Revision 1.25  2009/10/26 21:20:30  nbeck
 #    Added new output format and fixed some bugs for results selection.
 #
@@ -134,7 +137,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.25 2009/10/26 21:20:30 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.26 2009/11/07 00:21:40 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -345,8 +348,6 @@ if (@ARGV == 0) {
 ##################################
 $|=1;
 
-
-
 # Input options
 my $DATAFILE    = ""; # -d
 my $MODELNAME   = ""; # -m
@@ -491,6 +492,11 @@ if (defined($POURCENTISDEF)) {
 }
 &checkFile($DATAFILE);
 
+my %uniToThree = ( A => 'Ala', R => 'Arg', N => 'Asn', D => 'Asp', C => 'Cys', Q => 'Gln', E => 'Glu',
+                   G => 'Gly', H => 'His', I => 'Ile', L => 'Leu', K => 'Lys', M => 'Met', F => 'Phe',
+                   P => 'Pro', S => 'Ser', T => 'Thr', W => 'Trp', Y => 'Tyr', V => 'Val', B => 'Asx',
+                   Z => 'Glx', X => 'Xaa', '*' => 'Ter');
+
 ########
 # MAIN #
 ########
@@ -506,15 +512,15 @@ my $Ret_Rseqs = {};
 my ($nr_genome,$Rseqs) = &CreateNrGenome();
 my $AllErpinResult     = &CreateNrModelAndRunErpin();
 &SelectResult($AllErpinResult);
-&CreateRNAPredictions($AllErpinResult);
-&ScreenOutput($AllErpinResult);
+my ($short_summary,$screen_summary,$mail_summary) = &CreateRNAPredictions($AllErpinResult);
+&ScreenOutput($mail_summary,$screen_summary);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
 &sendMail() if $MAIL_ADR;
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
 
 #End of the script
-printf("%-49s", "Finished");
+printf("%-70s", "Finished");
 print strftime("\%H:\%M:\%S", gmtime(time-$TOTALSTART))."\n";
 if (-d $TMP_DIR){
 my $filename = basename($DATAFILE);
@@ -739,6 +745,7 @@ sub CreateNrModelAndRunErpin {
         my @list = split(/\|/, $NAME_LIST->{$name});
         my $model_list = $MENU_LIST->{lc($name)};
         die "No model found for '$name'\n" if !$model_list;
+        my $order      = $model_list->get_Order();
         my $ItemSet    = $model_list->{'Set'};
         print "\nProcessing $name\n";
         $LIST_OF_SEARCHED .= $LIST_OF_SEARCHED eq "" ? $name : "_$name";
@@ -747,7 +754,7 @@ sub CreateNrModelAndRunErpin {
         &DefineCutoffForAllItems($ItemSet,$FileForCut) if $POURCENTISDEF;
         &RunErpinForAllItems($ItemSet);
         my $erpin_res = &CreateErpinResultForAllItems($ItemSet);
-        $AllErpinResult->{"${name}"} = $erpin_res;
+        $AllErpinResult->{"$order"} = [$name,$erpin_res];
     }
     return $AllErpinResult;
 }
@@ -1013,144 +1020,143 @@ sub ParseErpinArgs {
 
 # Function which create a new training set with or without evalue filter
 sub MakeModel {
-	############################
-	## Variables & arguments  ##
-	############################
-	my $modelFile     = shift;
-	my $outputfile    = shift;
+    ############################
+    ## Variables & arguments  ##
+    ############################
+    my $modelFile     = shift;
+    my $outputfile    = shift;
     
     my $reportfile    = shift; # where we store our new report
     my $alignedfile   = shift; # where we store our aligned out
     
-	my $ECO_LOW       = shift;
-	my $ECO_UP        = shift;
+    my $ECO_LOW       = shift;
+    my $ECO_UP        = shift;
     my $lowest        = shift;
     my $erpinMaskNums = shift;
     my $label         = shift;
     
     my $ErpinResult   = new PirObject::erpinResult();
     my $Alignments    = [];
-	
-	my ($outSeqsRef, $outSeqEvalueOrderRef, $outSeqOriginalOrderRef, $dirRef, $startRef, $endRef, $eValueRef, $upper, $lower, $origNumResults);
-	
-	############################
-	## Read Erpin output file ##
-	############################
-	open(OUTPUT, $outputfile) or die ("Could not open output file '$outputfile': $!\n");
-	my @erpinOutputFile = <OUTPUT>;
-	close(OUTPUT);
-	#If there is no results in this file => quit with error message
-	&noErpinResultError() if @erpinOutputFile == 0;
-	
+    
+    my ($outSeqsRef, $outSeqEvalueOrderRef, $outSeqOriginalOrderRef, $dirRef, $startRef, $endRef, $eValueRef, $upper, $lower, $origNumResults);
+    
+    ############################
+    ## Read Erpin output file ##
+    ############################
+    open(OUTPUT, $outputfile) or die ("Could not open output file '$outputfile': $!\n");
+    my @erpinOutputFile = <OUTPUT>;
+    close(OUTPUT);
+    #If there is no results in this file => quit with error message
+    &noErpinResultError() if @erpinOutputFile == 0;
+    
     ###########################################################################################
-	## Lecture des sequences dans le fichier output erpin avec prise en compte bornes evalue ##
-	###########################################################################################
-	($outSeqsRef, $outSeqEvalueOrderRef, $outSeqOriginalOrderRef, $dirRef, $startRef, $endRef, $eValueRef, $upper, $lower, $origNumResults) = GetSeqFromOutputFile($ECO_LOW, $ECO_UP, \@erpinOutputFile);
-	
-	my %outSeqs              = %$outSeqsRef;
-	my @outSeqsEvalueOrder   = @$outSeqEvalueOrderRef;
-	my @outSeqsOriginalOrder = @$outSeqOriginalOrderRef;
-	my %dir                  = %$dirRef;
-	my %start                = %$startRef;
-	my %end                  = %$endRef;
-	my %eValue               = %$eValueRef;
-	
-	#####################
-	## Read Model File ##
-	#####################
-	open(MODEL, $modelFile) or die ("Could not open output file!");
-	my @modelFile = <MODEL>;
-	close(MODEL);
-	
+    ## Lecture des sequences dans le fichier output erpin avec prise en compte bornes evalue ##
+    ###########################################################################################
+    ($outSeqsRef, $outSeqEvalueOrderRef, $outSeqOriginalOrderRef, $dirRef, $startRef, $endRef, $eValueRef, $upper, $lower, $origNumResults) = GetSeqFromOutputFile($ECO_LOW, $ECO_UP, \@erpinOutputFile);
+    
+    my %outSeqs              = %$outSeqsRef;
+    my @outSeqsEvalueOrder   = @$outSeqEvalueOrderRef;
+    my @outSeqsOriginalOrder = @$outSeqOriginalOrderRef;
+    my %dir                  = %$dirRef;
+    my %start                = %$startRef;
+    my %end                  = %$endRef;
+    my %eValue               = %$eValueRef;
+    
+    #####################
+    ## Read Model File ##
+    #####################
+    open(MODEL, $modelFile) or die ("Could not open output file!");
+    my @modelFile = <MODEL>;
+    close(MODEL);
+    
     #Get the sequence consensus for modelFile.
     my $consensus = &GetConsensus($modelFile);
-	#Get the structures lines from the model file
-	my $structure = GetStructureFromModelFile(\@modelFile);
-	#Count number of sequences in the model
-	my $numModels = @outSeqsEvalueOrder;
+    #Get the structures lines from the model file
+    my $structure = GetStructureFromModelFile(\@modelFile);
+    #Count number of sequences in the model
+    my $numModels = @outSeqsEvalueOrder;
     $ErpinResult->set_OriSol($numModels);
-	
-	#############################
-	# 6. Build new training set #
-	#############################
-	
-	#creation of new model & log files
+    
+    #############################
+    # 6. Build new training set #
+    #############################
+    
+    #creation of new model & log files
     my $outputModel   = "$alignedfile";
-	my $modelLogFile  = "$reportfile";
-	open(OUTMODELLOG, ">$modelLogFile") or die "Could not open training set logfile\n";
-	open(OUTMODEL, ">$outputModel") or die "Could not open new training set file\n";
+    my $modelLogFile  = "$reportfile";
+    my $res_ali  = "";
+    my $res_log  = "";
+    my $res_tRNA = "";
 	
-	#Print structure in the training set
-	print OUTMODEL ">structure\n";
-	print OUTMODEL $structure;
-    print OUTMODEL ">consensus\n";
-    print OUTMODEL "$consensus\n";
+    #Print structure in the training set
+    $res_ali .= ">structure\n";
+    $res_ali .=  $structure;
+    $res_ali .=  ">consensus\n";
+    $res_ali .=  "$consensus\n";
     
-	## BEGIN : HEADER LOG FILE
-	print OUTMODELLOG "*************************************************\n";
-	print OUTMODELLOG "Condensed alignment for $outputModel\n";
-	print OUTMODELLOG "*************************************************\n";
-	print OUTMODELLOG "$numModels matches\n";
-    print OUTMODELLOG "Label: $label\n" if defined $label;
-	print OUTMODELLOG "\n";
+    ## BEGIN : HEADER LOG FILE
+    $res_log .=  "*************************************************\n";
+    $res_log .= "Condensed alignment for $outputModel\n";
+    $res_log .= "*************************************************\n";
+    $res_log .= "$numModels matches\n";
+    $res_log .= "Label: $label\n" if defined $label;
+    $res_log .= "\n";
     
-	## END : HEADER LOG FILE 
-	
-	my $prefixLen       = GetStructurePos($structure, $lowest);
-	my $prefixIndex     = $prefixLen;
-	my ($suffixLen,$suffixIndex) = (0,0);
-	my $structureLen    = GetStructureLength($structure);
+    ## END : HEADER LOG FILE 
+    
+    my $prefixLen       = GetStructurePos($structure, $lowest);
+    my $prefixIndex     = $prefixLen;
+    my ($suffixLen,$suffixIndex) = (0,0);
+    my $structureLen    = GetStructureLength($structure);
     my $lenSeq          = 0;
-	# Need to loop through all sequences first for report
-	# to see the max length of each sequence
-	# This is mainly because the sequences/models in the report
-	# need to be aligned, and if we don't know their lengths
-	# and gaps, then the alignments will be bad.
-	
-	my @maxBitLen;
-	my @preLoop = @outSeqsOriginalOrder;
-	
-	foreach my $key (@preLoop) {
-		my($arrayKey, $dirKey, $hashKey) = split("<->", $key);
-		my @reportHeader = split(" ", $hashKey);
-		my $tmpSeq = @{$outSeqs{$hashKey}}[$arrayKey];
-		my @seqBits = split(/\./, $tmpSeq);
+    # Need to loop through all sequences first for report
+    # to see the max length of each sequence
+    # This is mainly because the sequences/models in the report
+    # need to be aligned, and if we don't know their lengths
+    # and gaps, then the alignments will be bad.
+    
+    my @maxBitLen;
+    my @preLoop = @outSeqsOriginalOrder;
+    
+    foreach my $key (@preLoop) {
+        my($arrayKey, $dirKey, $hashKey) = split("<->", $key);
+        my @reportHeader = split(" ", $hashKey);
+        my $tmpSeq = @{$outSeqs{$hashKey}}[$arrayKey];
+        my @seqBits = split(/\./, $tmpSeq);
 		
-		for(my $i=0;$i<@seqBits;$i++) {
-			if($seqBits[$i] =~ m/^[\-]+$/) { $seqBits[$i] = "";}
-			
-			#If this is lowercase
-			#PR# elsif($seqBits[$i] =~ m/[a-z]/) { $seqBits[$i] =~ s/-//g; }
-			if(!defined($maxBitLen[$i]))                 { $maxBitLen[$i] = length($seqBits[$i]); }
-			elsif(length($seqBits[$i]) > $maxBitLen[$i]) { $maxBitLen[$i] = length($seqBits[$i]); }
-		}
-	}
-	
+        for(my $i=0;$i<@seqBits;$i++) {
+            if($seqBits[$i] =~ m/^[\-]+$/) { $seqBits[$i] = "";}
+                        if(!defined($maxBitLen[$i]))                 { $maxBitLen[$i] = length($seqBits[$i]); }
+            elsif(length($seqBits[$i]) > $maxBitLen[$i]) { $maxBitLen[$i] = length($seqBits[$i]); }
+            #If this is lowercase
+            #PR# elsif($seqBits[$i] =~ m/[a-z]/) { $seqBits[$i] =~ s/-//g; }
+        }
+    }
+    
     my $BracketModel = &MakeLogBrackets($structure, \@maxBitLen, $erpinMaskNums);
     # Maybe must be change
-        print OUTMODELLOG "Species name                       E-value   # of nt     Start..Stop     Str  #  Structure\n";
-	    print OUTMODELLOG "------------------------------  ---------- --------- -------------------- -- --- ------------------\n";
-        #Fields:           ssssssssssssssssssssssssssssss| EEEEEEEEEE NNNNNNNNN PPPPPPPPP..PPPPPPPPP SS MMM [[[...
-        #Fields:           0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
-        #print OUTMODELLOG "---------------------------------------------------------------------------------------------------\n"; 
-        print OUTMODELLOG "                                                                                 ";
-        print OUTMODELLOG $BracketModel . "\n";
+    $res_log .= "Species name                       E-value   # of nt     Start..Stop      Str  #  Structure\n";
+    $res_log .= "------------------------------  ---------- --------- -------------------- --- --- ------------------\n";
+    #Fields:           ssssssssssssssssssssssssssssss| EEEEEEEEEE NNNNNNNNN PPPPPPPPP..PPPPPPPPP SS MMM [[[...
+    #Fields:           0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
+    $res_log .= "                                                                                 ";
+    $res_log .= $BracketModel . "\n";
     
-	my @sortedList = @outSeqsOriginalOrder;
+    my @sortedList = @outSeqsOriginalOrder;
 	
 #######  REMARK :
 #######  In this part, there is a lots of "length($var)".
 #######  I think they can be replaced by temporary variables but sometimes i was thinking that i causes somes crashes.
 #######  
 	
-	foreach my $key (@sortedList) {
-		# Remember that the $key here contains three values;
-		# but we only care aobut the $arrayKey and the $hashKey.
-		# The $dirKey here is only in there to make all keys in 
-		# the hash unique 
-		my($arrayKey, $dirKey, $hashKey) = split("<->", $key);
-		$key = $hashKey;
-		my $tmpSeq = @{$outSeqs{$hashKey}}[$arrayKey];
+    foreach my $key (@sortedList) {
+        # Remember that the $key here contains three values;
+        # but we only care aobut the $arrayKey and the $hashKey.
+        # The $dirKey here is only in there to make all keys in 
+        # the hash unique 
+        my($arrayKey, $dirKey, $hashKey) = split("<->", $key);
+        $key = $hashKey;
+        my $tmpSeq = @{$outSeqs{$hashKey}}[$arrayKey];
         my $evalue = @{$eValue{$hashKey}}[$arrayKey];
         my $start  = @{$start{$hashKey}}[$arrayKey];
         my $stop   = @{$end{$hashKey}}[$arrayKey];
@@ -1158,126 +1164,125 @@ sub MakeModel {
         my $seq    = $Rseqs->{$key};
            $lenSeq = length($seq);
         my $aliNumber = ($arrayKey+1);
-		
+        
         # Copy sequence in the .log file
         my @reportHeader = split(" ", $key);
-		if(length($reportHeader[0]) > 30) {
-			$reportHeader[0] = substr($reportHeader[0], 0, 30);
-		}
+        if(length($reportHeader[0]) > 30) {
+            $reportHeader[0] = substr($reportHeader[0], 0, 30);
+        }
         
         # Report
-		# Allo.macrogynus.mt      6.55e-24   55667   6877..7327  FW   1  TATACAATCG CTA C C GACTG gtt...(1151)...ctt AATGTA CAGTC G GTATTTCCAA
+        # Allo.macrogynus.mt      6.55e-24   55667   6877..7327  FW   1  TATACAATCG CTA C C GACTG gtt...(1151)...ctt AATGTA CAGTC G GTATTTCCAA
         my $reportSeq  = makeReportSeq($tmpSeq, @maxBitLen);
         my $HeadForLog = sprintf ("%-30s| %10s %9s %9s..%-9s %s %3s ",
-				$reportHeader[0],
-				$evalue,
-				length($Rseqs->{$hashKey}),
-				$start,
-				$stop,
-				$dir,
-				$aliNumber);
+                        $reportHeader[0],
+                        $evalue,
+                        length($Rseqs->{$hashKey}),
+                        $start,
+                        $stop,
+                        $dir,
+                        $aliNumber);
                 
-        print OUTMODELLOG $HeadForLog;
-        print OUTMODELLOG $reportSeq . "\n";
+        $res_log .= $HeadForLog;
+        $res_log .= $reportSeq . "\n";
         
         # Copy sequence in the .ali file
-		# Make all uppercase
-		$tmpSeq = uc($tmpSeq);
-		$tmpSeq =~ s/\.//g;
-		
-		# CREATE HEADER IN THE MODEL FILE    
-		# Make header
+        # Make all uppercase
+        $tmpSeq = uc($tmpSeq);
+        $tmpSeq =~ s/\.//g;
+        
+        # CREATE HEADER IN THE MODEL FILE    
+        # Make header
         my $HeadForAli;
-		my $header;
-		my $keyLen = length($key);
-		# Trucate sequence name if greater than 60 characters long
-		if($keyLen > 60) { $header = ">" . substr($key, 0, 59);}
-		else {
-			$HeadForAli  = ">" . $key; 
-			$HeadForAli .= " " x (59-$keyLen);
-		}
-
-		$suffixLen     = $structureLen - $prefixLen - length($tmpSeq);
-		$suffixIndex   = $prefixLen + length($tmpSeq);
-
+        my $header;
+        my $keyLen = length($key);
+        # Trucate sequence name if greater than 60 characters long
+        if($keyLen > 60) { $header = ">" . substr($key, 0, 59);}
+        else {
+            $HeadForAli  = ">" . $key; 
+            $HeadForAli .= " " x (59-$keyLen);
+        }
+        
+        $suffixLen     = $structureLen - $prefixLen - length($tmpSeq);
+        $suffixIndex   = $prefixLen + length($tmpSeq);
+        
         my $posAdjustLeft  = $dir eq "FW"
-                                   ? -$prefixLen
-                                   : -$suffixLen;
+                            ? -$prefixLen
+                            : -$suffixLen;
         my $posAdjustRight = $dir eq "FW"
-                                   ? $suffixLen
-                                   : $prefixLen;
+                            ? $suffixLen
+                            : $prefixLen;
 		
-		$HeadForAli .= sprintf(" %s %6s:%6s %10s %s\n",
-			$dir,
-			$start + $posAdjustLeft,
-            $stop  + $posAdjustRight,
-			$evalue,
-			$DATAFILE);
+        $HeadForAli .= sprintf(" %s %6s:%6s %10s %s\n",
+                        $dir,
+                        $start + $posAdjustLeft,
+                        $stop  + $posAdjustRight,
+                        $evalue,
+                        $DATAFILE);
 		
-		print OUTMODEL $HeadForAli;
-		
-		# If we need to print out the header sequence
+        $res_ali .= $HeadForAli;
+        
+        # If we need to print out the header sequence
         my $headSeq;
-		my $tailSeq;
+        my $tailSeq;
         my $AliSeq = "";
-		if($prefixLen > 0) {
-			if($dir eq "RC") { 
-			# We need to reverse-complement the original sequence
-				if(($prefixLen + $stop) < length($seq)) {
-				    $headSeq = substr($seq, $stop, $prefixLen);
-					$headSeq = reverse($headSeq);
-					$headSeq =~ tr/ACGTacgt/TGCAtgca/;
-				}
-				elsif($stop < length($seq)) {
-					$headSeq = "n" x ($prefixLen - (length($seq) - $stop));
-					my $tmp = reverse(substr($seq, $stop , $prefixLen));
-					$tmp =~ tr/ACGTacgt/TGCAtgca/;
-					$headSeq .= $tmp;
-			    }
-				else {
-					$headSeq =  "n" x $prefixLen;
-				}
-			}
-			else {
-				if(($start - $prefixIndex) > 0) {
-					$headSeq =  substr($seq, ($start - $prefixIndex - 1), ($prefixLen));
-				}
-				elsif($start > 0 ) {
-					$headSeq  = "n" x ($prefixLen - $start + 1);
-					$headSeq .=  substr($seq, 0, $start - 1);
-				}
-				else {
-					$headSeq =  "n" x $prefixLen;
-				}
-			}
+        if($prefixLen > 0) {
+            if($dir eq "RC") { 
+            # We need to reverse-complement the original sequence
+                if(($prefixLen + $stop) < length($seq)) {
+                    $headSeq = substr($seq, $stop, $prefixLen);
+                    $headSeq = reverse($headSeq);
+                    $headSeq =~ tr/ACGTacgt/TGCAtgca/;
+                }
+                elsif($stop < length($seq)) {
+                    $headSeq = "n" x ($prefixLen - (length($seq) - $stop));
+                    my $tmp = reverse(substr($seq, $stop , $prefixLen));
+                    $tmp =~ tr/ACGTacgt/TGCAtgca/;
+                    $headSeq .= $tmp;
+                }
+                else {
+                    $headSeq =  "n" x $prefixLen;
+                }
+            }
+            else {
+                if(($start - $prefixIndex) > 0) {
+                    $headSeq =  substr($seq, ($start - $prefixIndex - 1), ($prefixLen));
+                }
+                elsif($start > 0 ) {
+                    $headSeq  = "n" x ($prefixLen - $start + 1);
+                    $headSeq .=  substr($seq, 0, $start - 1);
+                }
+                else {
+                    $headSeq =  "n" x $prefixLen;
+                }
+            }
             $AliSeq .= $headSeq if $headSeq;
-			print $key . "\n" if $DEBUG;
-		}
-		
+            print $key . "\n" if $DEBUG;
+        }
         $AliSeq .= &modifyModelSeq($tmpSeq, $structure, $prefixLen, $erpinMaskNums);
         
-		# If we need to print out the tail sequence
-		if($suffixLen > 0) {
-			if($dir  eq "RC") {
-				# We need to reverse-complement the original sequence
-				$suffixIndex   = $start - $suffixLen;
-				
-				if($suffixIndex > 0) {
-					$tailSeq = substr($seq, ($suffixIndex - 1), $suffixLen);
-					$tailSeq = reverse($tailSeq);
-					$tailSeq =~ tr/ACGTacgt/TGCAtgca/;
-				}
-				elsif ($start < length($seq)) {
+        # If we need to print out the tail sequence
+        if($suffixLen > 0) {
+            if($dir  eq "RC") {
+                # We need to reverse-complement the original sequence
+                $suffixIndex   = $start - $suffixLen;
+                
+                if($suffixIndex > 0) {
+                    $tailSeq = substr($seq, ($suffixIndex - 1), $suffixLen);
+                    $tailSeq = reverse($tailSeq);
+                    $tailSeq =~ tr/ACGTacgt/TGCAtgca/;
+                }
+                elsif ($start < length($seq)) {
                     if ($suffixIndex >= 0) {
-					$tailSeq  = substr(reverse($seq), (length($seq) - ($suffixLen + $suffixIndex) + 1), ($suffixLen + $suffixIndex));
-					$tailSeq  =~ tr/ACGTacgt/TGCAtgca/;
+                    $tailSeq  = substr(reverse($seq), (length($seq) - ($suffixLen + $suffixIndex) + 1), ($suffixLen + $suffixIndex));
+                    $tailSeq  =~ tr/ACGTacgt/TGCAtgca/;
                     $tailSeq .= "n" x (($suffixIndex * -1) +1);
                     }
-				}
-				else {
-					$tailSeq =  "n" x $suffixLen;
-				}
-			}
+                }
+                else {
+                    $tailSeq =  "n" x $suffixLen;
+                }
+            }
 			else {
 				# We need to print out a pending sequence
 				my $len = $stop;
@@ -1295,7 +1300,7 @@ sub MakeModel {
 			}
             $AliSeq .= $tailSeq if $tailSeq;
 		}
-		print OUTMODEL $AliSeq."\n";
+        $res_ali .= $AliSeq."\n";
         
         my $Alignment = new PirObject::erpinAlignement(
                         header     => $key,
@@ -1312,10 +1317,15 @@ sub MakeModel {
                         HeadForLog => $HeadForLog,
                         );
        push(@$Alignments,$Alignment);
-	}
-	close OUTMODEL;
-	close OUTMODELLOG;
-	
+    }
+    
+    open(OUTMODELLOG, ">$modelLogFile") or die "Could not open training set logfile\n";
+    open(OUTMODEL, ">$outputModel") or die "Could not open new training set file\n";
+    print OUTMODEL    $res_ali;
+    print OUTMODELLOG $res_log;
+    close OUTMODEL;
+    close OUTMODELLOG;
+    
     # Complete ErpinResult with general fields
     $ErpinResult->set_structure($structure);
     $ErpinResult->set_bracket($BracketModel);
@@ -1325,7 +1335,7 @@ sub MakeModel {
     $ErpinResult->set_fileName($DATAFILE);
     $ErpinResult->set_Alignments($Alignments);
     
-	return ($ErpinResult);
+    return ($ErpinResult);
 }
  
 sub GetConsensus {
@@ -1369,9 +1379,10 @@ sub GetSeqFromOutputFile {
 		chomp($line);
         
 		if($line =~ m/>(.*)/) {
-			$arrayCounter = 0 if $1 ne (defined($header) ? $header : "");
-			$header = $1;
-			next;
+            $arrayCounter = 0 if $1 ne (defined($header) ? $header : "");
+            $header = $1;
+            $header =~ s/\cM//;
+            next;
 		}
 		elsif(!defined($header)) { next; }
 		elsif($line =~ m/(FW|RC)\s+(\d+)\s+(-*[\d]+)\.\.([\d]+)\s+([\d\.]+)\s+([\d\.e\-\+]+)$/) { 
@@ -1651,7 +1662,7 @@ sub MakeLogBrackets {
             $brackets .= $sym x ($maxlen < 16 ? $maxlen : 16);
         }
     }
-    $brackets;
+    return $brackets;
 }
 
 sub CreateSeq {
@@ -1771,8 +1782,9 @@ sub SelectResult {
     my $AllErpinResult = shift;
     print "\nSelect best results for overlapping matches.\n";
     # Make results selection 
-    foreach my $block_name (keys %$AllErpinResult) {
-        my $block = $AllErpinResult->{$block_name};
+    foreach my $block_num (keys %$AllErpinResult) {
+        my $bl_name_block = $AllErpinResult->{$block_num};
+        my $block = $bl_name_block->[1];
         next if scalar(@$block) <= 1;
         &RemoveAlignment($block);
     }
@@ -2010,8 +2022,14 @@ sub CreateRNAPredictions {
     my $AllRNAPred = [];
     my $AllRNAPredictionList = [];
     my $nbTotRes   = 0;
-    foreach my $block_name (keys %$AllResult) {
-        my $block      = $AllResult->{$block_name};        
+    
+    my ($short_summary,$screen_summary,$mail_summary) = &CreateSummary($AllResult);
+    my ($tRNA_summary,$ali_summary,$log_summary) = ("","","");
+    
+    foreach my $res_num (sort keys %$AllResult) {
+        my $erpin_res  = $AllResult->{$res_num}; 
+        my $block_name = $erpin_res->[0];
+        my $block      = $erpin_res->[1];
         for(my $i = 0; $i < scalar(@$block); $i++) {
             my $sub_block   = $block->[$i];
             my $Alignments  = $sub_block->get_Alignments();
@@ -2025,13 +2043,17 @@ sub CreateRNAPredictions {
             my $comment     = $sub_block->get_comment();
             
             my $RNAPredictionList = PirObject::RNAPredictionList->new();
-            
-            my ($aliString,$logString,$csmString)
+                        
+            my ($aliString1,$trnaString,$aliString2,$logString,$csmString)
                 = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i);
-            my $predictlist = [];
-            ($predictlist,$aliString,$logString,$csmString) 
-                = &AddInfoForeachAli($Alignments,$aliString,$logString,$csmString,$block_name);
             
+            my $predictlist = [];
+            my $aliString3  = ""; #just to advance
+            ($predictlist,$trnaString,$aliString3,$logString,$csmString) 
+                = &AddInfoForeachAli($Alignments,$aliString3,$trnaString,$logString,$csmString,$block_name);
+            
+            $tRNA_summary .= $trnaString;
+            my $aliString = $aliString1.$aliString2.$aliString3;
             $ali_str .= "\n$aliString";
             $log_str .= "\n$logString";
             $csm_str .= "\n$csmString";
@@ -2044,6 +2066,17 @@ sub CreateRNAPredictions {
         }
     }
     
+    $ali_summary = $ali_str;
+    $ali_str  = "$short_summary\n\n";
+    $ali_str .= "List of identified tRNAs :\n\n" if $tRNA_summary;
+    $ali_str .= "$tRNA_summary\n";
+    $ali_str .= $ali_summary;
+    
+    $log_summary = $log_str;
+    $log_str  = "$short_summary\n\n";
+    $log_str .= "List of identified tRNAs :\n\n" if $tRNA_summary;
+    $log_str .= "$tRNA_summary\n";
+    $log_str .= $log_summary;
     
     print ALIFILE "$ali_str" if $ali_str;
     print LOGFILE "$log_str" if $log_str;
@@ -2065,12 +2098,67 @@ sub CreateRNAPredictions {
     close (CSMFILE);
     
     &CopyResults($aliFile,$logFile,$csmFile,$xmlFile,$apcFile) if !$MAIL_ADR;
+    return ($short_summary,$screen_summary,$mail_summary);
+}
+
+sub CreateSummary {
+    my $AllResult = shift;
+    
+    my ($short_summary,$screen_summary,$mail_summary) = ("","","");
+    
+    my $filename = basename($DATAFILE);
+    
+    my $nbTotRes   = 0;
+    
+    $screen_summary .= sprintf("\n%-30s %15s %15s \n%-30s %15s %15s", "","Initial #","Retained #","","of solution","of solution");
+    my $mail_pre = "<PRE><FONT face='courier' size=4>" if $MAIL_ADR;
+    # $short_summary .= sprintf("<br>%-30s %15s \n%-30s %15s", "","Retained #","","of solution") if $MAIL_ADR;
+    $short_summary .= sprintf("\n%-30s %15s \n%-30s %15s", "","Retained #","","of solution");
+    
+    foreach my $res_num (sort keys %$AllResult) {
+        my $erpin_res  = $AllResult->{$res_num}; 
+        my $block      = $erpin_res->[1];
+        for(my $i = 0; $i < scalar(@$block); $i++) {
+            my $sub_block  = $block->[$i];
+            my $comment    = $sub_block->get_comment();
+            my $nbOriSol   = $sub_block->get_OriSol();
+            my $time       = $sub_block->get_time();
+            my $Alignments = $sub_block->get_Alignments();
+            my $nbRetSol   = scalar(@$Alignments);
+            foreach my $ali (@$Alignments){
+                my $header = $ali->get_header();
+                $Ret_Rseqs->{$header}++;
+            }
+            $nbTotRes     += $nbRetSol if $comment =~ m/intron/;
+            $nbOriSol = 0 if !$nbOriSol;
+            $screen_summary .= sprintf("\n%-30.30s %15s %15s %15s", "$comment","$nbOriSol","$nbRetSol","$time");
+            # $short_summary   .= sprintf("<br>%-30.30s %15s", "$comment","$nbRetSol") if $MAIL_ADR;
+            $short_summary   .= sprintf("\n%-30.30s %15s", "$comment","$nbRetSol");
+        }
+    }
+    if ($nbTotRes != 0) {
+        $screen_summary .= "\n------------------------------------------------------------------------------";
+        $screen_summary .= sprintf("\n%-30s %15s %15s\n", "Total number of introns","","$nbTotRes");
+        $short_summary  .= "\n----------------------------------------------";
+        $short_summary  .= sprintf("\n%-30s %15s\n", "Total number of introns","$nbTotRes");
+    }
+    else {
+        $screen_summary .= "\n";
+        $short_summary .= "\n";
+    }
+
+    my $mail_suf  .= "</FONT></PRE>"if $MAIL_ADR;
+    $mail_summary = $short_summary;
+    $mail_summary =~ s/\n/<br>/;
+    $mail_summary = $mail_pre.$mail_summary.$mail_suf;
+    
+    return ($short_summary,$screen_summary,$mail_summary);
 }
 
 sub CreateHeadString {
     my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i) = @_;
     
-    my $headString = "";
+    my ($headString,$trnaString) = ("","");
     if (defined($MAIL_ADR)) {
         if ($i == 0) {
             $headString .=  "*************************************************\n";
@@ -2092,27 +2180,35 @@ sub CreateHeadString {
     
     }
     
-    my $aliString = $headString;
-    $aliString .= ">structure\n$structure";
-    $aliString .= ">consensus\n$consensus\n";
+    my $aliString1 = $headString;
+    
+    my $aliString2 = ">structure\n$structure";
+       $aliString2 .= ">consensus\n$consensus\n";
     
     my $logString = $headString;
     $logString =~ s/Alignment/Condensed alignment/;
-    $logString .=  "Species name                       E-value   # of nt     Start..Stop     Str  #  Structure\n";
-    $logString .=  "------------------------------  ---------- --------- -------------------- -- --- ------------------\n";
+    $logString .=  "Species name                       E-value   # of nt     Start..Stop      Str  #  Structure\n";
+    $logString .=  "------------------------------  ---------- --------- -------------------- --- --- ------------------\n";
     $logString .=  "                                                                                 ";
     $logString .=  $bracket . "\n";
+    
+    if ($block_name =~ m/tRNA/i) {
+        $trnaString .=  "                                               tRNA   tRNA tRNA  Anti  \n";
+        $trnaString .=  "Species name                   tRNA # Strand  Begin    End Type Codon  E-value\n";
+        $trnaString .=  "------------------------------ ------ ------ ------ ------ ---- ----- --------\n";
+    }
     
     my $csmString = $headString;
     $csmString =~ s/Alignment/Result/;
 
-    return ($aliString,$logString,$csmString);
+    return ($aliString1,$trnaString,$aliString2,$logString,$csmString);
 }
 
 sub AddInfoForeachAli {
-    my ($Alignments,$aliString,$logString,$csmString,$block_name) = @_;
+    my ($Alignments,$aliString,$trnaString,$logString,$csmString,$block_name) = @_;
     
     my $predictlist = [];
+    my $count = 1;
     foreach my $ali (@$Alignments) {
         my $RNAPrediction = PirObject::RNAPrediction->new();
         my $HeadForAli    = $ali->get_HeadForAli();
@@ -2125,35 +2221,56 @@ sub AddInfoForeachAli {
         $aliString       .= "$HeadForAli"."$AliForAli\n";
         my $HeadForLog    = $ali->get_HeadForLog();
         my $AliForLog     = $ali->get_AliForLog();
+        
+        # Adjust Number
+        $HeadForLog =~ s/\|//;
+        $HeadForLog =~ s/\.\./  /;
+        my @HeadElem = split(/\s+/, $HeadForLog);
+        $HeadForLog = sprintf ("%-30s| %10s %9s %9s..%-9s %s %3s ",
+				$HeadElem[0],
+				$HeadElem[1],
+				$HeadElem[2],
+				$HeadElem[3],
+				$HeadElem[4],
+				$HeadElem[5],
+                $count);
+
         $logString       .= "$HeadForLog"."$AliForLog\n";
         $csmString       .= "------------------\n";
+        
+        my $RNA_num       = $ali->get_aliNumber();
         
         my $AcAa       = $ali->get_AcAa();
         if (defined($AcAa)) {
             $RNAPrediction->set_aacode($AcAa);
             $csmString .= "tRNA_AA:         $AcAa\n";
         }
+        
         my $contigname = $ali->get_header();
         if (defined($contigname)) {
             $RNAPrediction->set_contigname($contigname);
             $csmString .= "Contigname:      $contigname\n";
         }
+        
         my $strand     = $ali->get_strand();
         if (defined($strand)) { 
-            $strand     = ($strand eq "RC" ? "-" : "+");
-            $RNAPrediction->set_strand($strand);
-            $csmString .= "Strand:          $strand\n";
+            my $sign     = ($strand eq "RC" ? "-" : "+");
+            $RNAPrediction->set_strand($sign);
+            $csmString .= "Strand:          $sign\n";
         }
+        
         my $Start   = $block_name eq "tRNA" ? $ali->get_AliStart() : $ali->get_LogStart();
         if (defined($Start)) {
             $RNAPrediction->set_start($Start);
             $csmString .= "Start:           $Start\n";
         }
+        
         my $Stop    = $block_name eq "tRNA" ? $ali->get_AliStop() : $ali->get_LogStop();
         if (defined($Stop)) { 
             $RNAPrediction->set_stop($Stop);
             $csmString .= "Stop:            $Stop\n";
         }
+        
         my $evalue     = $ali->get_evalue();
         if (defined($evalue)) {
             $RNAPrediction->set_evalue($evalue);
@@ -2165,20 +2282,38 @@ sub AddInfoForeachAli {
             $RNAPrediction->set_anticodon_start($AcStart);
             $csmString .= "Anticodon_start: $AcStart\n";
         }
+        
         my $AcStop     = $ali->get_AcStop();
         if (defined($AcStop)) {
             $RNAPrediction->set_anticodon_stop($AcStop);
             $csmString .= "Anticodon_stop:  $AcStop\n";
         }
+        
         my $AcSeq     = $ali->get_AcTriNt();
         if (defined($AcSeq)) {
             $RNAPrediction->set_anticodon_seq($AcSeq);
             $csmString .= "Anticodon_seq:   $AcSeq\n";
         }
+        
         $csmString       .= "\n";
+        ($Start,$Stop) = ($Stop,$Start) if $strand eq "RC";
+        
+        if ($trnaString) {
+            $trnaString .= sprintf ("%-30s %6s %6s %6s %6s %4s %5s %s\n",
+                    $contigname,
+                    $count,
+                    $strand,
+                    $Start,
+                    $Stop,
+                    $uniToThree{"$AcAa"},
+                    $AcSeq,
+                    $evalue);
+        }
         push(@$predictlist,$RNAPrediction);
+        $count++;
     }
-    return ($predictlist,$aliString,$logString,$csmString);
+    $trnaString .= "\n" if $trnaString;
+    return ($predictlist,$trnaString,$aliString,$logString,$csmString);
 }
 
 sub CreateAPCFile {
@@ -2299,41 +2434,15 @@ sub CreateAnnotPair {
 }
 
 sub ScreenOutput {
-    my $AllResult = shift;
+    my ($mail_summary,$screen_summary) = @_;
     
     my $filename = basename($DATAFILE);
     my $mail_content = "$TMP_DIR/$filename.mail" if $MAIL_ADR;
     open(MAIL, ">$mail_content") or die ("Could not open $mail_content file!\n") if $MAIL_ADR;
-    
-    my $nbTotRes   = 0;
-    printf("\n%-25s %15s %15s \n%-25s %15s %15s", "","Initial #","Retained #","","of solution","of solution");
-    my $mail_str .= "<PRE><FONT face='courier' size=4>" if $MAIL_ADR;
-       $mail_str .= sprintf("<br>%-25s %15s \n%-25s %15s", "","Retained #","","of solution") if $MAIL_ADR;
-    
-    foreach my $block_name (keys %$AllResult) {
-        my $block      = $AllResult->{$block_name};
-        for(my $i = 0; $i < scalar(@$block); $i++) {
-            my $sub_block  = $block->[$i];
-            my $comment    = $sub_block->get_comment();
-            my $nbOriSol   = $sub_block->get_OriSol();
-            my $time       = $sub_block->get_time();
-            my $Alignments = $sub_block->get_Alignments();
-            my $nbRetSol   = scalar(@$Alignments);
-            foreach my $ali (@$Alignments){
-                my $header = $ali->get_header();
-                $Ret_Rseqs->{$header}++;
-            }
-            $nbTotRes     += $nbRetSol;
-            $nbOriSol = 0 if !$nbOriSol;
-            printf("\n%-25.20s %15s %15s %15s", "$comment","$nbOriSol","$nbRetSol","$time");
-            $mail_str .= sprintf("<br>%-25.20s %15s", "$comment","$nbRetSol") if $MAIL_ADR;
-        }
-    }
-    printf("\n%-25s %15s %15s\n", "Total","","$nbTotRes");
-    $mail_str .= sprintf("<br>%-25s %15s\n", "Total","$nbTotRes") if $MAIL_ADR;
-    $mail_str .= "</FONT></PRE>"if $MAIL_ADR;
-    print MAIL $mail_str if $MAIL_ADR;
+    print MAIL $mail_summary if $MAIL_ADR;
     close(MAIL) if $MAIL_ADR;
+    
+    print $screen_summary;
 }
 
 sub ListOfEmptySeq {
@@ -2360,11 +2469,11 @@ sub sendMail {
     
 	my $subject   = "RNAweasel Result for $MODELNAME on $filename";
 	my $mail_file = "$TMP_DIR/$filename.mail";
-	my $ali_file  = "$TMP_DIR/$filename.ali.tmp";
+	my $log_file  = "$TMP_DIR/$filename.log.tmp";
 	my $mailErr   = "$TMP_DIR/mailErr";
 	my $mailOut   = "$TMP_DIR/mailOut";
 	
-    my $cmd = "perl /services/WWW/cgi-bin/RNAweasel/bin/sendmail.pl -f \'rnaweasel\@gmail.com\' -t \'$MAIL_ADR\' -s \'$subject\' -a \'$mail_file , $ali_file\'";
+    my $cmd = "perl /services/WWW/cgi-bin/RNAweasel/bin/sendmail.pl -f \'rnaweasel\@gmail.com\' -t \'$MAIL_ADR\' -s \'$subject\' -a \'$mail_file , $log_file\'";
 	print STDERR $cmd if $DEBUG;
 	my $ret = system("$cmd 2> $mailErr");
 	
