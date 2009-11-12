@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.26 2009/11/07 00:21:40 nbeck Exp $
+#    $Id: RNAfinder,v 1.27 2009/11/12 22:18:15 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.27  2009/11/12 22:18:15  nbeck
+#    Changed .log format.
+#
 #    Revision 1.26  2009/11/07 00:21:40  nbeck
 #    Changed output format.
 #
@@ -137,7 +140,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.26 2009/11/07 00:21:40 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.27 2009/11/12 22:18:15 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -2068,13 +2071,13 @@ sub CreateRNAPredictions {
     
     $ali_summary = $ali_str;
     $ali_str  = "$short_summary\n\n";
-    $ali_str .= "List of identified tRNAs :\n\n" if $tRNA_summary;
+    $ali_str .= "List of identified tRNAs prediction of complete structure, including discriminator position :\n\n" if $tRNA_summary;
     $ali_str .= "$tRNA_summary\n";
     $ali_str .= $ali_summary;
     
     $log_summary = $log_str;
     $log_str  = "$short_summary\n\n";
-    $log_str .= "List of identified tRNAs :\n\n" if $tRNA_summary;
+    $log_str .= "List of identified tRNAs prediction of complete structure, including discriminator position :\n\n" if $tRNA_summary;
     $log_str .= "$tRNA_summary\n";
     $log_str .= $log_summary;
     
@@ -2150,7 +2153,7 @@ sub CreateSummary {
     my $mail_suf  .= "</FONT></PRE>"if $MAIL_ADR;
     $mail_summary = $short_summary;
     $mail_summary =~ s/\n/<br>/;
-    $mail_summary = $mail_pre.$mail_summary.$mail_suf;
+    $mail_summary = $mail_pre.$mail_summary.$mail_suf if $MAIL_ADR;
     
     return ($short_summary,$screen_summary,$mail_summary);
 }
@@ -2209,6 +2212,7 @@ sub AddInfoForeachAli {
     
     my $predictlist = [];
     my $count = 1;
+    my $prev_head = "";
     foreach my $ali (@$Alignments) {
         my $RNAPrediction = PirObject::RNAPrediction->new();
         my $HeadForAli    = $ali->get_HeadForAli();
@@ -2222,7 +2226,7 @@ sub AddInfoForeachAli {
         my $HeadForLog    = $ali->get_HeadForLog();
         my $AliForLog     = $ali->get_AliForLog();
         
-        # Adjust Number
+        # Adjust Number and reverse start and stop if RC
         $HeadForLog =~ s/\|//;
         $HeadForLog =~ s/\.\./  /;
         my @HeadElem = split(/\s+/, $HeadForLog);
@@ -2230,12 +2234,15 @@ sub AddInfoForeachAli {
 				$HeadElem[0],
 				$HeadElem[1],
 				$HeadElem[2],
-				$HeadElem[3],
-				$HeadElem[4],
+				$HeadElem[5] eq 'FW' ? $HeadElem[3] : $HeadElem[4],
+				$HeadElem[5] eq 'FW' ? $HeadElem[4] : $HeadElem[3],
 				$HeadElem[5],
                 $count);
-
-        $logString       .= "$HeadForLog"."$AliForLog\n";
+        
+        # Add blank line in order to separe contig
+        $logString       .= $prev_head && $prev_head ne $HeadElem[0] ? 
+                            "\n$HeadForLog"."$AliForLog\n" :
+                            "$HeadForLog"."$AliForLog\n";
         $csmString       .= "------------------\n";
         
         my $RNA_num       = $ali->get_aliNumber();
@@ -2299,6 +2306,7 @@ sub AddInfoForeachAli {
         ($Start,$Stop) = ($Stop,$Start) if $strand eq "RC";
         
         if ($trnaString) {
+            $trnaString .= "\n" if $prev_head && $prev_head ne $HeadElem[0];
             $trnaString .= sprintf ("%-30s %6s %6s %6s %6s %4s %5s %s\n",
                     $contigname,
                     $count,
@@ -2310,6 +2318,7 @@ sub AddInfoForeachAli {
                     $evalue);
         }
         push(@$predictlist,$RNAPrediction);
+        $prev_head = $HeadElem[0];
         $count++;
     }
     $trnaString .= "\n" if $trnaString;
