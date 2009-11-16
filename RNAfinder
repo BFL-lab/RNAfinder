@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.27 2009/11/12 22:18:15 nbeck Exp $
+#    $Id: RNAfinder,v 1.28 2009/11/16 21:53:41 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.28  2009/11/16 21:53:41  nbeck
+#    Changed message in mail core.
+#
 #    Revision 1.27  2009/11/12 22:18:15  nbeck
 #    Changed .log format.
 #
@@ -140,7 +143,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.27 2009/11/12 22:18:15 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.28 2009/11/16 21:53:41 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -2115,7 +2118,6 @@ sub CreateSummary {
     
     $screen_summary .= sprintf("\n%-30s %15s %15s \n%-30s %15s %15s", "","Initial #","Retained #","","of solution","of solution");
     my $mail_pre = "<PRE><FONT face='courier' size=4>" if $MAIL_ADR;
-    # $short_summary .= sprintf("<br>%-30s %15s \n%-30s %15s", "","Retained #","","of solution") if $MAIL_ADR;
     $short_summary .= sprintf("\n%-30s %15s \n%-30s %15s", "","Retained #","","of solution");
     
     foreach my $res_num (sort keys %$AllResult) {
@@ -2135,7 +2137,6 @@ sub CreateSummary {
             $nbTotRes     += $nbRetSol if $comment =~ m/intron/;
             $nbOriSol = 0 if !$nbOriSol;
             $screen_summary .= sprintf("\n%-30.30s %15s %15s %15s", "$comment","$nbOriSol","$nbRetSol","$time");
-            # $short_summary   .= sprintf("<br>%-30.30s %15s", "$comment","$nbRetSol") if $MAIL_ADR;
             $short_summary   .= sprintf("\n%-30.30s %15s", "$comment","$nbRetSol");
         }
     }
@@ -2477,8 +2478,9 @@ sub sendMail {
     my $filename = basename($DATAFILE);
     
 	my $subject   = "RNAweasel Result for $MODELNAME on $filename";
-	my $mail_file = "$TMP_DIR/$filename.mail";
-	my $log_file  = "$TMP_DIR/$filename.log.tmp";
+    my $mail_file = "/services/WWW/cgi-bin/RNAweasel/mail_core";
+    die "File for mail core doesn't exist" if !(-f "$mail_file");
+    my $log_file  = "$TMP_DIR/$filename.log.tmp";
 	my $mailErr   = "$TMP_DIR/mailErr";
 	my $mailOut   = "$TMP_DIR/mailOut";
 	
