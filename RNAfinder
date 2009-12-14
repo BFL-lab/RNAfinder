@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.28 2009/11/16 21:53:41 nbeck Exp $
+#    $Id: RNAfinder,v 1.29 2009/12/14 18:29:11 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.29  2009/12/14 18:29:11  nbeck
+#    Fixed length of contigname.
+#
 #    Revision 1.28  2009/11/16 21:53:41  nbeck
 #    Changed message in mail core.
 #
@@ -143,7 +146,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.28 2009/11/16 21:53:41 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.29 2009/12/14 18:29:11 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -2308,8 +2311,9 @@ sub AddInfoForeachAli {
         
         if ($trnaString) {
             $trnaString .= "\n" if $prev_head && $prev_head ne $HeadElem[0];
+            my $short_cg_len = length($contigname) > 30 ? substr($contigname,0,30) : $contigname;
             $trnaString .= sprintf ("%-30s %6s %6s %6s %6s %4s %5s %s\n",
-                    $contigname,
+                    $short_cg_len,
                     $count,
                     $strand,
                     $Start,
