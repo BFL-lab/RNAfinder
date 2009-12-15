@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.29 2009/12/14 18:29:11 nbeck Exp $
+#    $Id: RNAfinder,v 1.30 2009/12/15 17:05:33 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.30  2009/12/15 17:05:33  nbeck
+#    Changed start and end position in particular case.
+#
 #    Revision 1.29  2009/12/14 18:29:11  nbeck
 #    Fixed length of contigname.
 #
@@ -146,7 +149,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.29 2009/12/14 18:29:11 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.30 2009/12/15 17:05:33 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -951,12 +954,17 @@ sub CreateErpinResultForAllItems {
         my $lowest        = $Item->get_lowest();
         my $erpinOut      = $Item->get_erpinOut();
         my $time          = $Item->get_time();
+        my $comment       = $Item->get_comment();
         my $erpinSuff     = $erpinOut;
            $erpinSuff     =~ s/.out$//;
         my $erpinLog      = "$erpinSuff.log";
         my $erpinAli      = "$erpinSuff.ali";
         
-        my $erpinResult   = &MakeModel($model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums);
+        my $takeAliCoord  = 0; 
+           $takeAliCoord  = 1 if $comment =~ m/rns/ && $comment =~ m/complete/;
+           $takeAliCoord  = 3 if $comment =~ m/rns/ && $comment =~ m/3/;
+           $takeAliCoord  = 5 if $comment =~ m/rns/ && $comment =~ m/5/;
+        my $erpinResult   = &MakeModel($takeAliCoord,$model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums);
         next if !$erpinResult;
         
         # Add info foreach erpinResult
@@ -965,7 +973,6 @@ sub CreateErpinResultForAllItems {
         $erpinResult->set_NumItem($Item_num);
         $erpinResult->set_time($time);
         my $label         = $Item->get_Label();
-        my $comment       = $Item->get_comment();
         $erpinResult->set_Label($label);
         $erpinResult->set_comment($comment);
         
@@ -1032,6 +1039,7 @@ sub MakeModel {
     ############################
     ## Variables & arguments  ##
     ############################
+    my $takeAliCoord  = shift;
     my $modelFile     = shift;
     my $outputfile    = shift;
     
@@ -1311,14 +1319,24 @@ sub MakeModel {
 		}
         $res_ali .= $AliSeq."\n";
         
+        my ($logstart,$logstop) = ("","");
+        if ($takeAliCoord != 0) {
+            $logstart = $start + $posAdjustLeft  if $takeAliCoord == 1 || $takeAliCoord == 3;
+            $HeadForLog =~ s/${start}/${logstart}/;
+            $logstop  = $stop  + $posAdjustRight if $takeAliCoord == 1 || $takeAliCoord == 5;
+            $HeadForLog =~ s/${stop}/${logstop}/;
+        }
+        $logstart = $logstart eq "" ? $start : $logstart;
+        $logstop  = $logstop  eq "" ? $stop  : $logstop;
+        
         my $Alignment = new PirObject::erpinAlignement(
                         header     => $key,
                         aliNumber  => $aliNumber,
                         strand     => $dir,
                         AliStart   => $start + $posAdjustLeft,
                         AliStop    => $stop  + $posAdjustRight,
-                        LogStart   => $start,
-                        LogStop    => $stop,
+                        LogStart   => $logstart,
+                        LogStop    => $logstop,
                         evalue     => $evalue,
                         AliForAli  => $AliSeq,
                         AliForLog  => $reportSeq,
