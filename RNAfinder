@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.30 2009/12/15 17:05:33 nbeck Exp $
+#    $Id: RNAfinder,v 1.31 2010/02/18 15:53:43 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.31  2010/02/18 15:53:43  nbeck
+#    Added block for complete structure (rns) adjust coord.
+#
 #    Revision 1.30  2009/12/15 17:05:33  nbeck
 #    Changed start and end position in particular case.
 #
@@ -149,7 +152,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.30 2009/12/15 17:05:33 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.31 2010/02/18 15:53:43 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -720,7 +723,7 @@ sub CopyWithoutDuplicates {
         my $outfile_basename = basename("${outfile}.RemoveSeqName");
         if (!$MAIL_ADR && $nb_dupli > 0 && !$REMOVEINTAR) {
             system("cp","${outfile}.RemoveSeqName","./ListSeqName");
-            print "\nData present $nb_dupli duplicates, list of duplicates is in : ListSeqName\n";
+            print "\nRemoved $nb_dupli identical sequences from the data, listed in: ListSeqName\n";
         }
         if (!$MAIL_ADR && $REMOVEINTAR) {
             system("cp","${outfile}.RemoveSeqName","./RemoveSeqName");
@@ -960,11 +963,7 @@ sub CreateErpinResultForAllItems {
         my $erpinLog      = "$erpinSuff.log";
         my $erpinAli      = "$erpinSuff.ali";
         
-        my $takeAliCoord  = 0; 
-           $takeAliCoord  = 1 if $comment =~ m/rns/ && $comment =~ m/complete/;
-           $takeAliCoord  = 3 if $comment =~ m/rns/ && $comment =~ m/3/;
-           $takeAliCoord  = 5 if $comment =~ m/rns/ && $comment =~ m/5/;
-        my $erpinResult   = &MakeModel($takeAliCoord,$model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums);
+        my $erpinResult   = &MakeModel($model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums);
         next if !$erpinResult;
         
         # Add info foreach erpinResult
@@ -1039,7 +1038,6 @@ sub MakeModel {
     ############################
     ## Variables & arguments  ##
     ############################
-    my $takeAliCoord  = shift;
     my $modelFile     = shift;
     my $outputfile    = shift;
     
@@ -1319,24 +1317,14 @@ sub MakeModel {
 		}
         $res_ali .= $AliSeq."\n";
         
-        my ($logstart,$logstop) = ("","");
-        if ($takeAliCoord != 0) {
-            $logstart = $start + $posAdjustLeft  if $takeAliCoord == 1 || $takeAliCoord == 3;
-            $HeadForLog =~ s/${start}/${logstart}/;
-            $logstop  = $stop  + $posAdjustRight if $takeAliCoord == 1 || $takeAliCoord == 5;
-            $HeadForLog =~ s/${stop}/${logstop}/;
-        }
-        $logstart = $logstart eq "" ? $start : $logstart;
-        $logstop  = $logstop  eq "" ? $stop  : $logstop;
-        
         my $Alignment = new PirObject::erpinAlignement(
                         header     => $key,
                         aliNumber  => $aliNumber,
                         strand     => $dir,
                         AliStart   => $start + $posAdjustLeft,
                         AliStop    => $stop  + $posAdjustRight,
-                        LogStart   => $logstart,
-                        LogStop    => $logstop,
+                        LogStart   => $start,
+                        LogStop    => $stop,
                         evalue     => $evalue,
                         AliForAli  => $AliSeq,
                         AliForLog  => $reportSeq,
@@ -1867,8 +1855,8 @@ sub RemoveAlignment {
                     my $isOv = &OverlappingRegions($seqLen,$start_i,$stop_i,">",$start_j,$stop_j,">");
                     next if !$isOv;
                     if ($iIsj == 1) {
-                        $evalue_i = "1e-100" if $evalue_i =~ m/^([\+\-]?)([\d\.]*)(?:e([\+\-]?00))?$/x;
-                        $evalue_j = "1e-100" if $evalue_j =~ m/^([\+\-]?)([\d\.]*)(?:e([\+\-]?00))?$/x;
+                        $evalue_i = "1e-100" if $evalue_i =~ m/^([\+\-]?)([\d\.]*)(?:e([\-]?00))?$/x;
+                        $evalue_j = "1e-100" if $evalue_j =~ m/^([\+\-]?)([\d\.]*)(?:e([\-]?00))?$/x;
                         my $iHaveBetterEvalue =  &CompareHighPrecisionFloats($evalue_i,$evalue_j) == -1  ? 1 : 0;
                         # Keep result with better evalue
                         splice(@$ali_block_i, $i_ali, 1) if $iHaveBetterEvalue == 0; # splice i
@@ -2051,7 +2039,7 @@ sub CreateRNAPredictions {
     my $nbTotRes   = 0;
     
     my ($short_summary,$screen_summary,$mail_summary) = &CreateSummary($AllResult);
-    my ($tRNA_summary,$ali_summary,$log_summary) = ("","","");
+    my ($RNA_summary,$ali_summary,$log_summary) = ("","","");
     
     foreach my $res_num (sort keys %$AllResult) {
         my $erpin_res  = $AllResult->{$res_num}; 
@@ -2069,17 +2057,22 @@ sub CreateRNAPredictions {
             my $consensus   = $sub_block->get_consensus();
             my $comment     = $sub_block->get_comment();
             
+            my $takeAliCoord  = 0; 
+            $takeAliCoord  = 1 if $comment =~ m/rns/ && $comment =~ m/complete/;
+            $takeAliCoord  = 3 if $comment =~ m/rns/ && $comment =~ m/3/;
+            $takeAliCoord  = 5 if $comment =~ m/rns/ && $comment =~ m/5/;
+            
             my $RNAPredictionList = PirObject::RNAPredictionList->new();
-                        
-            my ($aliString1,$trnaString,$aliString2,$logString,$csmString)
-                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i);
+            
+            my ($aliString1,$rnaString,$aliString2,$logString,$csmString)
+                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i,$takeAliCoord);
             
             my $predictlist = [];
             my $aliString3  = ""; #just to advance
-            ($predictlist,$trnaString,$aliString3,$logString,$csmString) 
-                = &AddInfoForeachAli($Alignments,$aliString3,$trnaString,$logString,$csmString,$block_name);
+            ($predictlist,$rnaString,$aliString3,$logString,$csmString) 
+                = &AddInfoForeachAli($Alignments,$aliString3,$rnaString,$logString,$csmString,$block_name,$comment,$takeAliCoord);
             
-            $tRNA_summary .= $trnaString;
+            $RNA_summary .= $rnaString;
             my $aliString = $aliString1.$aliString2.$aliString3;
             $ali_str .= "\n$aliString";
             $log_str .= "\n$logString";
@@ -2095,14 +2088,12 @@ sub CreateRNAPredictions {
     
     $ali_summary = $ali_str;
     $ali_str  = "$short_summary\n\n";
-    $ali_str .= "List of identified tRNAs prediction of complete structure, including discriminator position :\n\n" if $tRNA_summary;
-    $ali_str .= "$tRNA_summary\n";
+    $ali_str .= "$RNA_summary\n" if ($RNA_summary);
     $ali_str .= $ali_summary;
     
     $log_summary = $log_str;
     $log_str  = "$short_summary\n\n";
-    $log_str .= "List of identified tRNAs prediction of complete structure, including discriminator position :\n\n" if $tRNA_summary;
-    $log_str .= "$tRNA_summary\n";
+    $log_str .= "$RNA_summary\n" if ($RNA_summary);
     $log_str .= $log_summary;
     
     print ALIFILE "$ali_str" if $ali_str;
@@ -2181,9 +2172,9 @@ sub CreateSummary {
 }
 
 sub CreateHeadString {
-    my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i) = @_;
+    my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i,$takeAliCoord) = @_;
     
-    my ($headString,$trnaString) = ("","");
+    my ($headString,$rnaString) = ("","");
     if (defined($MAIL_ADR)) {
         if ($i == 0) {
             $headString .=  "*************************************************\n";
@@ -2218,19 +2209,26 @@ sub CreateHeadString {
     $logString .=  $bracket . "\n";
     
     if ($block_name =~ m/tRNA/i) {
-        $trnaString .=  "                                               tRNA   tRNA tRNA  Anti  \n";
-        $trnaString .=  "Species name                   tRNA # Strand  Begin    End Type Codon  E-value\n";
-        $trnaString .=  "------------------------------ ------ ------ ------ ------ ---- ----- --------\n";
+        $rnaString .= "List of identified tRNAs prediction of complete structure, including discriminator position :\n\n";
+        $rnaString .=  "                                               tRNA   tRNA tRNA  Anti  \n";
+        $rnaString .=  "Species name                   tRNA # Strand  Begin    End Type Codon  E-value\n";
+        $rnaString .=  "------------------------------ ------ ------ ------ ------ ---- ----- --------\n";
+    }
+    elsif ($takeAliCoord != 0) {
+        $rnaString .= "List of identified $comment prediction of complete structure :\n\n";
+        $rnaString .=  "                                                RNA    RNA\n";
+        $rnaString .=  "Species name                    RNA # Strand  Begin    End             E-value\n";
+        $rnaString .=  "------------------------------ ------ ------ ------ ------ ---- ----- --------\n";
     }
     
     my $csmString = $headString;
     $csmString =~ s/Alignment/Result/;
 
-    return ($aliString1,$trnaString,$aliString2,$logString,$csmString);
+    return ($aliString1,$rnaString,$aliString2,$logString,$csmString);
 }
 
 sub AddInfoForeachAli {
-    my ($Alignments,$aliString,$trnaString,$logString,$csmString,$block_name) = @_;
+    my ($Alignments,$aliString,$rnaString,$logString,$csmString,$block_name,$comment,$takeAliCoord) = @_;
     
     my $predictlist = [];
     my $count = 1;
@@ -2288,13 +2286,15 @@ sub AddInfoForeachAli {
             $csmString .= "Strand:          $sign\n";
         }
         
-        my $Start   = $block_name eq "tRNA" ? $ali->get_AliStart() : $ali->get_LogStart();
+        my $Start   = $block_name eq "tRNA" || $takeAliCoord == 1 || $takeAliCoord == 5
+                     ? $ali->get_AliStart() : $ali->get_LogStart();
         if (defined($Start)) {
             $RNAPrediction->set_start($Start);
             $csmString .= "Start:           $Start\n";
         }
         
-        my $Stop    = $block_name eq "tRNA" ? $ali->get_AliStop() : $ali->get_LogStop();
+        my $Stop    = $block_name eq "tRNA" || $takeAliCoord == 1 || $takeAliCoord == 3 
+                     ? $ali->get_AliStop() : $ali->get_LogStop();
         if (defined($Stop)) { 
             $RNAPrediction->set_stop($Stop);
             $csmString .= "Stop:            $Stop\n";
@@ -2327,25 +2327,28 @@ sub AddInfoForeachAli {
         $csmString       .= "\n";
         ($Start,$Stop) = ($Stop,$Start) if $strand eq "RC";
         
-        if ($trnaString) {
-            $trnaString .= "\n" if $prev_head && $prev_head ne $HeadElem[0];
+        if ($rnaString) {
+            $rnaString .= "\n" if $prev_head && $prev_head ne $HeadElem[0];
             my $short_cg_len = length($contigname) > 30 ? substr($contigname,0,30) : $contigname;
-            $trnaString .= sprintf ("%-30s %6s %6s %6s %6s %4s %5s %s\n",
+            my $Anti = $uniToThree{"$AcAa"} if $AcAa;
+            $Start = "N.A" if $takeAliCoord == 3;
+            $Stop  = "N.A" if $takeAliCoord == 5;
+            $rnaString .= sprintf ("%-30s %6s %6s %6s %6s %4s %5s %s\n",
                     $short_cg_len,
                     $count,
                     $strand,
                     $Start,
                     $Stop,
-                    $uniToThree{"$AcAa"},
-                    $AcSeq,
+                    $Anti  ||"",
+                    $AcSeq ||"",
                     $evalue);
         }
         push(@$predictlist,$RNAPrediction);
         $prev_head = $HeadElem[0];
         $count++;
     }
-    $trnaString .= "\n" if $trnaString;
-    return ($predictlist,$trnaString,$aliString,$logString,$csmString);
+    $rnaString .= "\n" if $rnaString;
+    return ($predictlist,$rnaString,$aliString,$logString,$csmString);
 }
 
 sub CreateAPCFile {
@@ -2433,8 +2436,8 @@ sub CreateAnnotPair {
         $endline    = ";     G-trn${aacode}\($ac\) $arrow end";
     }
     elsif ($name =~ m/intron/i) {
-        $startline  = ";;     group=$label";
-        $endline    = ";;";
+        $startline  = ";; mfannot:     /group=$label";
+        $endline    = ";; mfannot:";
         $name       = "comment";
     }
     else {
