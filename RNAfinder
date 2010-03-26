@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.31 2010/02/18 15:53:43 nbeck Exp $
+#    $Id: RNAfinder,v 1.32 2010/03/26 20:31:59 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.32  2010/03/26 20:31:59  nbeck
+#    Changed default output.
+#
 #    Revision 1.31  2010/02/18 15:53:43  nbeck
 #    Added block for complete structure (rns) adjust coord.
 #
@@ -152,7 +155,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.31 2010/02/18 15:53:43 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.32 2010/03/26 20:31:59 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -383,7 +386,7 @@ my $CUSTOMOUTFILE  = ""; # -C
 my $APCOUTFILE     = ""; # -M
 my $REMOVEINTAR    = ""; # -r
 my $TMP_DIR        = "/tmp/RNAfinder.$$"; # -T
-my $CSMOUTFILE_NOTDEF = 0;
+my $LOGOUTFILE_NOTDEF = 0;
 
 # Other
 my $CODON_TABLE   = "";
@@ -453,7 +456,7 @@ foreach my $arg (@NAME_LIST){
 if (     $ALIGNEDOUTFILE eq "" && $REPORTFILE    eq "" 
       && $XMLOUTFILE     eq "" && $CUSTOMOUTFILE eq "" 
       && $APCOUTFILE eq "") {
-      $CSMOUTFILE_NOTDEF = 1;
+      $LOGOUTFILE_NOTDEF = 1;
 }
 
 my @AF_HOSTS= qw( megasuno.bcm.umontreal.ca
@@ -2524,7 +2527,7 @@ sub CopyResults {
     # Copy results to user's selected output files
     my ($aliFile,$logFile,$csmFile,$xmlFile,$apcFile) = @_;
     
-    $CUSTOMOUTFILE = "${DATAFILE}_${LIST_OF_SEARCHED}.csm" if $CSMOUTFILE_NOTDEF;
+    $REPORTFILE = "${DATAFILE}_${LIST_OF_SEARCHED}.log" if $LOGOUTFILE_NOTDEF;
     
     if ($ALIGNEDOUTFILE) {
         my $infh  = new IO::File "<$aliFile"
