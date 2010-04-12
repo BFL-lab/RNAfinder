@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.32 2010/03/26 20:31:59 nbeck Exp $
+#    $Id: RNAfinder,v 1.33 2010/04/12 19:03:23 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.33  2010/04/12 19:03:23  nbeck
+#    Fixed bug with genome name containing "|".
+#
 #    Revision 1.32  2010/03/26 20:31:59  nbeck
 #    Changed default output.
 #
@@ -155,7 +158,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.32 2010/03/26 20:31:59 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.33 2010/04/12 19:03:23 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -2250,15 +2253,14 @@ sub AddInfoForeachAli {
         my $AliForLog     = $ali->get_AliForLog();
         
         # Adjust Number and reverse start and stop if RC
-        $HeadForLog =~ s/\|//;
-        $HeadForLog =~ s/\.\./  /;
         my @HeadElem = split(/\s+/, $HeadForLog);
+        my @PosElem  = split(/\.\./, $HeadElem[4]);
         $HeadForLog = sprintf ("%-30s| %10s %9s %9s..%-9s %s %3s ",
 				$HeadElem[0],
-				$HeadElem[1],
 				$HeadElem[2],
-				$HeadElem[5] eq 'FW' ? $HeadElem[3] : $HeadElem[4],
-				$HeadElem[5] eq 'FW' ? $HeadElem[4] : $HeadElem[3],
+				$HeadElem[3],
+				$HeadElem[5] eq 'FW' ? $PosElem[0] : $PosElem[1],
+				$HeadElem[5] eq 'FW' ? $PosElem[1] : $PosElem[0],
 				$HeadElem[5],
                 $count);
         
