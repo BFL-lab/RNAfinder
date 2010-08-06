@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.33 2010/04/12 19:03:23 nbeck Exp $
+#    $Id: RNAfinder,v 1.34 2010/08/06 20:59:56 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.34  2010/08/06 20:59:56  nbeck
+#    Changed -c option for -g.
+#
 #    Revision 1.33  2010/04/12 19:03:23  nbeck
 #    Fixed bug with genome name containing "|".
 #
@@ -158,7 +161,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.33 2010/04/12 19:03:23 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.34 2010/08/06 20:59:56 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -227,7 +230,7 @@ $BASENAME [-D] [-c genetic code] -d datafile -m model
 
 Input data options:
 -------------------
--c               Genetic code, only use for tRNA in order to defined anticodon.
+-g               Genetic code, only use for tRNA in order to defined anticodon.
                  
 -d data          File containing sequence to search, in FASTA format.
                  Warning: because of restrictions in how some subprocesses
@@ -418,7 +421,7 @@ for (;@ARGV;) {
     $MAIL_ADR       = $arg              if $opt eq 'a'; 
     $POURCENT       = $arg              if $opt eq 'pc';
     $POURCENTISDEF  = 1                 if $opt eq 'pc';
-    $GENETICCODE    = $arg              if $opt eq 'c';
+    $GENETICCODE    = $arg              if $opt eq 'g';
     $DATAFILE       = $arg              if $opt eq 'd';
     $MODELNAME      = $arg              if $opt eq 'm';
     $LIST           = $arg              if $opt eq 'l';
@@ -575,7 +578,7 @@ sub DefineNumberOfProcessor {
 }
 
 sub CreateNrGenome {
-    my $nr_genome = "$TMP_DIR/genome.fa";
+    my $nr_genome = (-e "$TMP_DIR/genome.fa") ? "$TMP_DIR/genome1.fa" : "$TMP_DIR/genome.fa";
     my $Rseqs = &CopyWithoutDuplicates($DATAFILE,$nr_genome,"","RemoveDuplicatesByIDs|ReturnHash",50);
     return ($nr_genome,$Rseqs);
 }
