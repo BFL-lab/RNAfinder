@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.34 2010/08/06 20:59:56 nbeck Exp $
+#    $Id: RNAfinder,v 1.35 2011/01/20 22:18:10 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.35  2011/01/20 22:18:10  nbeck
+#    Added function for model fusion (for tRNA).
+#
 #    Revision 1.34  2010/08/06 20:59:56  nbeck
 #    Changed -c option for -g.
 #
@@ -161,7 +164,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.34 2010/08/06 20:59:56 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.35 2011/01/20 22:18:10 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -225,7 +228,7 @@ This program ($BASENAME):
 Usage:
 -------------------
 $BASENAME [-D] [-c genetic code] -d datafile -m model
-               [-A alignedOut] [-L logOut] [-X xmlOut] [-C CustomOut] 
+               [-A alignedOut] [-L logOut] [-X xmlOut] [-C CustomOut] [-F FastaOut]
                [-pc pourcent] [-P nb_proc] [-l]
 
 Input data options:
@@ -249,7 +252,7 @@ Input data options:
 Output report options:
 ----------------------
 5 different reports can be created by this program, you can ask any or all of them to be created.
-Default output option is -C, the output file will be named 'fastagenome' + ".csm".
+Default output option is -L, the output file will be named 'fastagenome' + ".log".
 
 -A alignedOut    Is a concatenation of results in the same format 
                  as the erpin model supplied with -m.
@@ -264,6 +267,8 @@ Default output option is -C, the output file will be named 'fastagenome' + ".csm
                  by the -X option.
                  
 -M ApcOut        This is a file containing a list of AnnotPair (AnnotPairCollection) for MFannot.
+
+-F FastaOut      This is a file containing aligned fasta sequence header contain '>AminoAcid(TriNt)ContigName'
 
 Other options:
 --------------
@@ -390,6 +395,7 @@ my $REPORTFILE     = ""; # -L
 my $XMLOUTFILE     = ""; # -X
 my $CUSTOMOUTFILE  = ""; # -C
 my $APCOUTFILE     = ""; # -M
+my $FAAOUTFILE     = ""; # -F
 my $REMOVEINTAR    = ""; # -r
 my $TMP_DIR        = "/tmp/RNAfinder.$$"; # -T
 my $LOGOUTFILE_NOTDEF = 0;
@@ -406,11 +412,11 @@ my $TOTALSTART    = time;
 
 for (;@ARGV;) {
     # Add in the regex [] ALL single-character command-line options
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([adcmlrALXCMPDT]|pc)(.*)$/);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([adcmlrgALXCMPDTF]|pc)(.*)$/);
     last if ! defined $opt;
     # Add in regex [] ONLY single-character options that
     # REQUIRE an argument, except for the 'd' debug switch.
-    if ($opt =~ /[adcmlALXCMPT]|pc/ && $arg eq "") { 
+    if ($opt =~ /[adcmlgALXCMPTF]|pc/ && $arg eq "") { 
         if (@ARGV < 2) {
             print "Argument required for option \"$opt\".\n";
             exit 1;
@@ -430,6 +436,7 @@ for (;@ARGV;) {
     $XMLOUTFILE     = $arg              if $opt eq 'X';
     $CUSTOMOUTFILE  = $arg              if $opt eq 'C';
     $APCOUTFILE     = $arg              if $opt eq 'M'; 
+    $FAAOUTFILE     = $arg              if $opt eq 'F'; 
     $DEBUG          = ($arg ? $arg : 1) if $opt eq 'D';
     $REMOVEINTAR    = ($arg ? $arg : 1) if $opt eq 'r';
     $TMP_DIR        = $arg              if $opt eq 'T';
@@ -461,7 +468,7 @@ foreach my $arg (@NAME_LIST){
 &Usage if @ARGV > 0 || $DATAFILE eq "" || $MODELNAME eq "";
 if (     $ALIGNEDOUTFILE eq "" && $REPORTFILE    eq "" 
       && $XMLOUTFILE     eq "" && $CUSTOMOUTFILE eq "" 
-      && $APCOUTFILE eq "") {
+      && $APCOUTFILE     eq "" && $FAAOUTFILE    eq "") {
       $LOGOUTFILE_NOTDEF = 1;
 }
 
@@ -494,7 +501,7 @@ unless (-d $TMP_DIR) { mkdir($TMP_DIR,0777); }
 
 my $HOME = $ENV{"HOME"};
 # Models and lib path
-my @MOD_PATH = ("./Erpin_models"); # You can add other search directories here
+my @MOD_PATH = ("./Erpin_models") if $DIR_CFG eq "."; # You can add other search directories here
 
 push(@MOD_PATH,split(/:/,$ENV{"ERPIN_MOD_PATH"}))
     if $ENV{"ERPIN_MOD_PATH"};
@@ -533,12 +540,13 @@ if ($PARALLELISM > $NB_PROC) {
    $PARALLELISM = $NB_PROC;
 }
 my $Ret_Rseqs = {};
-my ($nr_genome,$Rseqs) = &CreateNrGenome();
-my $AllErpinResult     = &CreateNrModelAndRunErpin();
-&SelectResult($AllErpinResult);
+my ($nr_genome,$Rseqs,$SubToFullId,$HeadOrder) = &CreateNrGenome();
+my $AllErpinResult = &CreateNrModelAndRunErpin();
+my $NoFoundInSup   = &SelectResult($AllErpinResult,$HeadOrder);
 my ($short_summary,$screen_summary,$mail_summary) = &CreateRNAPredictions($AllErpinResult);
 &ScreenOutput($mail_summary,$screen_summary);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
+&MessageForMissingRes($NoFoundInSup) if scalar(@$NoFoundInSup) != 0;
 &sendMail() if $MAIL_ADR;
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
@@ -553,6 +561,7 @@ rename("$TMP_DIR/$filename.csm.tmp","$TMP_DIR/$filename.csm");
 rename("$TMP_DIR/$filename.xml.tmp","$TMP_DIR/$filename.xml");
 rename("$TMP_DIR/$filename.apc.tmp","$TMP_DIR/$filename.apc");
 rename("$TMP_DIR/$filename.ali.tmp","$TMP_DIR/$filename.ali");
+rename("$TMP_DIR/$filename.faa.tmp","$TMP_DIR/$filename.faa");
 }
 exit(0);
 
@@ -579,8 +588,8 @@ sub DefineNumberOfProcessor {
 
 sub CreateNrGenome {
     my $nr_genome = (-e "$TMP_DIR/genome.fa") ? "$TMP_DIR/genome1.fa" : "$TMP_DIR/genome.fa";
-    my $Rseqs = &CopyWithoutDuplicates($DATAFILE,$nr_genome,"","RemoveDuplicatesByIDs|ReturnHash",50);
-    return ($nr_genome,$Rseqs);
+    my ($Rseqs,$SubToFullId,$HeaderOrder) = &CopyWithoutDuplicates($DATAFILE,$nr_genome,"","RemoveDuplicatesByIDs|ReturnHash",50);
+    return ($nr_genome,$Rseqs,$SubToFullId,$HeaderOrder);
 }
 
 sub CreateNrModel {
@@ -644,8 +653,10 @@ sub CopyWithoutDuplicates {
     my $Interest_seq  = "";
     my $nb_dupli      = 0;
     
-    my %IdToSeq = (); # all seq data in a hash; returned if option ReturnHash is true
-
+    my %IdToSeq       = (); # all seq data in a hash; returned if option ReturnHash is true
+    my %SplitIdToFull = (); # all Split Id with her Full id correspandance. 
+    my $HeaderOrder   = [];
+    
     while (my $line = <$infh>) {
         next if $line =~ m#^\s*$|^;#;
 
@@ -658,9 +669,10 @@ sub CopyWithoutDuplicates {
         }
 
         # Header line.
-        my $newid = $1; # from regex above
-           $newid = substr($newid,0,57) if length($newid) > 57 && !$byseq;
-
+        my $oldid = $1; # from regex above
+        my $newid = length($oldid) > 57 && !$byseq ? substr($oldid,0,57) : $oldid;
+           $SplitIdToFull{$newid} = $oldid if $oldid;
+           push(@$HeaderOrder,$newid);
         # Dump previous record if needed
         my $isdupl = 0;
         if (defined($byseq)) {
@@ -739,7 +751,7 @@ sub CopyWithoutDuplicates {
             print "\nList of duplicates removed from target sequences: RemoveSeqName\n";
         }
     }
-    return(\ %IdToSeq) if $returnhash;
+    return(\ %IdToSeq, \ %SplitIdToFull, $HeaderOrder) if $returnhash;
     1;
 }
 
@@ -777,8 +789,10 @@ sub CreateNrModelAndRunErpin {
         &CreateNrModelForAllItems($ItemSet,$name,\@list);
         &DefineCutoffForAllItems($ItemSet,$FileForCut) if $POURCENTISDEF;
         &RunErpinForAllItems($ItemSet);
+        my $toFus     = $model_list->get_ToFus();
+        my $inclusion = $model_list->get_Inclusion();
         my $erpin_res = &CreateErpinResultForAllItems($ItemSet);
-        $AllErpinResult->{"$order"} = [$name,$erpin_res];
+        $AllErpinResult->{"$order"} = [$name,$erpin_res,$toFus,$inclusion];
     }
     return $AllErpinResult;
 }
@@ -967,6 +981,7 @@ sub CreateErpinResultForAllItems {
         my $erpinOut      = $Item->get_erpinOut();
         my $time          = $Item->get_time();
         my $comment       = $Item->get_comment();
+        my $gaptoend      = $Item->get_gaptoend();
         my $erpinSuff     = $erpinOut;
            $erpinSuff     =~ s/.out$//;
         my $erpinLog      = "$erpinSuff.log";
@@ -982,12 +997,12 @@ sub CreateErpinResultForAllItems {
         $erpinResult->set_time($time);
         my $label         = $Item->get_Label();
         $erpinResult->set_Label($label);
+        $erpinResult->set_gaptoend($gaptoend);
         $erpinResult->set_comment($comment);
         
         # Add anticodon information
         my $Ac_id         = $Item->get_AcId();
-        &DefineCodonTable($GENETICCODE) if $Ac_id && !$CODON_TABLE;
-        &AddAcInfo($erpinAli,$Ac_id,$erpinResult) if $Ac_id;
+        &AddAcInfo($erpinAli,$Ac_id,$erpinResult,$GENETICCODE) if $Ac_id;
         push(@$erpin_res,$erpinResult);
     }
     return $erpin_res;
@@ -1149,8 +1164,8 @@ sub MakeModel {
         my @seqBits = split(/\./, $tmpSeq);
 		
         for(my $i=0;$i<@seqBits;$i++) {
-            if($seqBits[$i] =~ m/^[\-]+$/) { $seqBits[$i] = "";}
-                        if(!defined($maxBitLen[$i]))                 { $maxBitLen[$i] = length($seqBits[$i]); }
+            if   ($seqBits[$i] =~ m/^[\-]+$/)            { $seqBits[$i] = "";}
+            if   (!defined($maxBitLen[$i]))              { $maxBitLen[$i] = length($seqBits[$i]); }
             elsif(length($seqBits[$i]) > $maxBitLen[$i]) { $maxBitLen[$i] = length($seqBits[$i]); }
             #If this is lowercase
             #PR# elsif($seqBits[$i] =~ m/[a-z]/) { $seqBits[$i] =~ s/-//g; }
@@ -1172,21 +1187,25 @@ sub MakeModel {
 #######  In this part, there is a lots of "length($var)".
 #######  I think they can be replaced by temporary variables but sometimes i was thinking that i causes somes crashes.
 #######  
-	
+	my ($prev_cg_name,$cnt_foreach_ali) = ("",0);
     foreach my $key (@sortedList) {
         # Remember that the $key here contains three values;
-        # but we only care aobut the $arrayKey and the $hashKey.
+        # but we only care about the $arrayKey and the $hashKey.
         # The $dirKey here is only in there to make all keys in 
         # the hash unique 
         my($arrayKey, $dirKey, $hashKey) = split("<->", $key);
+        my $cg_name = $hashKey;
+        if ($prev_cg_name eq "" || $prev_cg_name eq $cg_name) { $cnt_foreach_ali++; } else { $cnt_foreach_ali = 1;}
+        $prev_cg_name = $cg_name;
+        
         $key = $hashKey;
-        my $tmpSeq = @{$outSeqs{$hashKey}}[$arrayKey];
-        my $evalue = @{$eValue{$hashKey}}[$arrayKey];
-        my $start  = @{$start{$hashKey}}[$arrayKey];
-        my $stop   = @{$end{$hashKey}}[$arrayKey];
-        my $dir    = @{$dir{$hashKey}}[$arrayKey];
-        my $seq    = $Rseqs->{$key};
-           $lenSeq = length($seq);
+        my $tmpSeq    = @{$outSeqs{$hashKey}}[$arrayKey];
+        my $evalue    = @{$eValue{$hashKey}}[$arrayKey];
+        my $start     = @{$start{$hashKey}}[$arrayKey];
+        my $stop      = @{$end{$hashKey}}[$arrayKey];
+        my $dir       = @{$dir{$hashKey}}[$arrayKey];
+        my $seq       = $Rseqs->{$key};
+           $lenSeq    = length($seq);
         my $aliNumber = ($arrayKey+1);
         
         # Copy sequence in the .log file
@@ -1205,8 +1224,8 @@ sub MakeModel {
                         $start,
                         $stop,
                         $dir,
-                        $aliNumber);
-                
+                        $cnt_foreach_ali);
+                                        
         $res_log .= $HeadForLog;
         $res_log .= $reportSeq . "\n";
         
@@ -1220,7 +1239,7 @@ sub MakeModel {
         my $HeadForAli;
         my $header;
         my $keyLen = length($key);
-        # Trucate sequence name if greater than 60 characters long
+        # Truncate sequence name if greater than 60 characters long
         if($keyLen > 60) { $header = ">" . substr($key, 0, 59);}
         else {
             $HeadForAli  = ">" . $key; 
@@ -1358,6 +1377,9 @@ sub MakeModel {
     $ErpinResult->set_SequenceLen($lenSeq);
     $ErpinResult->set_fileName($DATAFILE);
     $ErpinResult->set_Alignments($Alignments);
+    $ErpinResult->set_erpinMaskNums($erpinMaskNums);
+    $ErpinResult->set_maxBitLength(\ @maxBitLen);
+    $ErpinResult->set_modelFile($modelFile);
     
     return ($ErpinResult);
 }
@@ -1722,23 +1744,14 @@ sub noErpinResultError {
 #  For tRNA prediction  #
 #########################
 
-sub DefineCodonTable {
-    my $GENETICCODE = shift;
-    
-    while () {
-       last if $GENETICCODE;
-       print "No genetic code has been specified, which genetic code do you want to use ? 
-       (ncbi genetic code accepted, example 1 for standard genetic code)\n";
-       $GENETICCODE = <STDIN>;
-       last if $GENETICCODE =~ m/^\d+$/;
-    }
-    
-    $CODON_TABLE = Bio::Tools::CodonTable->new( -id => $GENETICCODE )
-        or die "Cannot find codon table for genetic code id '$GENETICCODE' ?!?\n";
-}
-
 sub AddAcInfo {
-    my ($AliFile,$ac_ID,$erpinResult) = @_;
+    my ($AliFile,$ac_ID,$erpinResult,$GENETICCODE) = @_;
+    
+    my $CODON_HASH = {};
+    if ($GENETICCODE) {
+        $CODON_HASH->{$GENETICCODE} = Bio::Tools::CodonTable->new( -id => $GENETICCODE )
+            or die "Cannot find codon table for genetic code id '$GENETICCODE' ?!?\n";
+    }
     
     my $linstruct  = PirObject::LinStruct->new();
     my $align_fh   = new IO::File "<$AliFile"
@@ -1750,26 +1763,61 @@ sub AddAcInfo {
     my $ac_elem     = $elemIndex->{"$ac_ID"}          # the element for the anticodon
         or die "Cannot find element '$ac_ID' for anticodon in structure?!?\n";
     my $ac_offset   = $ac_elem->get_startposL();
-    my $rac_offset  = $length_ali-$ac_offset-3;  # reverse offset
+    my $rac_offset  = $length_ali-$ac_offset-$ac_elem->get_elemLength();  # reverse offset
     
     my $elem_len =  $ac_elem->get_elemLength();
-    die "The element '$ac_ID' is $elem_len nt long, it can not match the anticodon\n" if $elem_len != 3;
     
-    my $Alignments = $erpinResult->get_Alignments();
+    my $Alignments   = $erpinResult->get_Alignments();
     foreach my $Alignment (@$Alignments) {
+        my $header      = $Alignment->get_header();
+        my $fullheader  = $SubToFullId->{$header};
+        my $GeneticCode = $fullheader =~ m/\/trans\s*=\s*(\d+)/ ? $1 : $GENETICCODE;
+        
+        while () {
+            last if $GeneticCode;
+            print "No genetic code has been specified for sequence '$header', which genetic code do you want to use ? 
+            (ncbi genetic code accepted, example 1 for standard genetic code)\n";
+            $GeneticCode = <STDIN>;
+            last if $GeneticCode =~ m/^\d+$/;
+        }
+        
+        if (!$CODON_HASH->{$GeneticCode}) {
+            $CODON_HASH->{$GeneticCode} = Bio::Tools::CodonTable->new( -id => $GeneticCode )
+             or die "Cannot find codon table for genetic code id '$GeneticCode' ?!?\n";
+        }
+        
         my $AliForAli = $Alignment->get_AliForAli();
         
         # Define Amino Acid
-        my $ac = uc substr($AliForAli,$ac_offset,3);   # anticodon
+        my $ac  = uc substr($AliForAli,$ac_offset,$elem_len);   # anticodon
+           $ac  =~ s/-//g;
         my $codon = $ac;                               # codon as used in protein
         $codon = reverse $codon;
         $codon =~ tr/UTCGA/AAGCT/;
-        my $aa = $CODON_TABLE->translate($codon) || "X";
+        
+        my $aa = "";
+        if (length($codon) == 3 ) {
+            $aa = $CODON_HASH->{$GeneticCode}->translate($codon) || "X";
+        }
+        elsif (length($codon) == 4) {
+            if ($ac =~ m/TAG$/) {
+                $aa = "T";
+            }
+            else {
+                $aa = "X";
+                print "Unknow translation for anticodon '$ac'\n"
+            }
+        }
+        else {
+            print "Anticodon '$ac' have no standard length\n";
+        }
         
         # Define Anticodon position
         my $strand = $Alignment->get_strand();
         my ($tRNA_begin,$tRNA_end) = ($Alignment->get_AliStart(),$Alignment->get_AliStop());
         my $begin_ac = 0;
+         my $ac_wo_gap = $ac; 
+            $ac_wo_gap =~ s/-//g;
         if ($strand eq "FW") {
             my $seq_before_ac  =  substr($AliForAli,0,$ac_offset);
                $seq_before_ac  =~ s/-+//g;
@@ -1785,7 +1833,7 @@ sub AddAcInfo {
         }
         
         $Alignment->set_AcStart($begin_ac);
-        $Alignment->set_AcStop($begin_ac+2);
+        $Alignment->set_AcStop($begin_ac+length($ac_wo_gap)-1);
         $Alignment->set_AcAa($aa);
         $Alignment->set_AcTriNt($ac);
         
@@ -1803,19 +1851,37 @@ sub AddAcInfo {
 #########################
 
 sub SelectResult {
-    my $AllErpinResult = shift;
+    my ($AllErpinResult,$HeaderOrder) = @_;
     print "\nSelect best results for overlapping matches.\n";
-    # Make results selection 
+    # Make results selection
+    my $All_NoFoundInSup = [];
     foreach my $block_num (keys %$AllErpinResult) {
         my $bl_name_block = $AllErpinResult->{$block_num};
         my $block = $bl_name_block->[1];
         next if scalar(@$block) <= 1;
-        &RemoveAlignment($block);
+        my $name = $bl_name_block->[0];
+        my $tot_iniSol    = &TotIniSol($block);
+        my $inclusion     = $bl_name_block->[3];
+        my ($NoFoundInSup,$initial_nbsol) = &RemoveAlignment($block,$tot_iniSol,$name,$inclusion);
+        push(@$All_NoFoundInSup,$NoFoundInSup) if scalar(@$NoFoundInSup) != 0;
+        &MakeFusionResult($block,$HeaderOrder,$initial_nbsol) if $bl_name_block->[2] == 1;
     }
+    return $All_NoFoundInSup;
+}
+
+sub TotIniSol {
+    my $block = shift; 
+    
+    my $tot_iniSol = 0;
+    foreach my $sub_block (@$block) {
+         my $alis = $sub_block->get_Alignments();
+         $tot_iniSol += scalar(@$alis);
+    }
+    return $tot_iniSol;
 }
 
 sub RemoveAlignment {
-    my $block = shift;
+    my ($block,$tot_iniSol,$name,$inclusion) = @_;
     
     for(my $i = 0; $i < scalar(@$block); $i++) {
         my $sub_block_i = $block->[$i];
@@ -1862,7 +1928,12 @@ sub RemoveAlignment {
                     ($start_j, $stop_j) = ($stop_j, $start_j) if $stop_j < $start_j;
                     my $seqLen = $sub_block_j->get_SequenceLen();
                     my $isOv = &OverlappingRegions($seqLen,$start_i,$stop_i,">",$start_j,$stop_j,">");
-                    next if !$isOv;
+                    
+                    next if !$isOv; # if OV
+                    my ($str1,$str2) = ("$i>$j","$j>$i");
+                    $ali_i->set_FoundInSupModel(1) if (grep(/$str1/,@$inclusion));
+                    $ali_j->set_FoundInSupModel(1) if (grep(/$str2/,@$inclusion));
+                    $tot_iniSol--;
                     if ($iIsj == 1) {
                         $evalue_i = "1e-100" if $evalue_i =~ m/^([\+\-]?)([\d\.]*)(?:e([\-]?00))?$/x;
                         $evalue_j = "1e-100" if $evalue_j =~ m/^([\+\-]?)([\d\.]*)(?:e([\-]?00))?$/x;
@@ -1886,6 +1957,42 @@ sub RemoveAlignment {
         @$ali_block_i ? $sub_block_i->set_Alignments([@$ali_block_i])
                               : $sub_block_i->set_Alignments([]) ;
     }
+    
+    my $NoFoundInSup = &CompletNoFoundInSup($block,$inclusion);
+    return ($NoFoundInSup,$tot_iniSol);
+}
+
+sub CompletNoFoundInSup {
+    my ($block,$inclusions) = @_;
+    
+    my $NoFound = [];
+    return [] if $inclusions->[0] eq "0";
+    for(my $i = 0; $i < scalar(@$block); $i++) {
+        my $sub_block_i = $block->[$i];
+        my $ali_block_i = $sub_block_i->get_Alignments();
+        my $inclusion   = GetInclusion($inclusions,$i);
+        next if !$inclusion;
+        my $NoFoundForI = [];
+        foreach my $ali (@$ali_block_i) {
+            next if $ali->get_FoundInSupModel();
+            push(@$NoFoundForI,$ali);
+        }
+        if (scalar(@$NoFoundForI) != 0) {
+            push(@$NoFoundForI,$inclusion);
+            push(@$NoFound,$NoFoundForI);
+        }
+    }
+    return $NoFound;
+}
+
+sub GetInclusion {
+    my ($inclusions,$i) = @_;
+    
+    foreach my $inclusion (@$inclusions) {
+        next if $inclusion !~ m/^$i>/;
+        return $inclusion;
+    }
+    return 0;
 }
 
 sub CompareModBlock {
@@ -2019,6 +2126,318 @@ sub CompareHighPrecisionFloats {
     return ($xman <=> $yman);                    # $x and $y have same EXP, so compare mantissas
 }
 
+sub MakeFusionResult {
+    my ($block,$HeaderOrder,$initial_nbsol) = @_;
+    
+    # Take all ali
+    my $all_ali = [];
+    for(my $i = 0; $i < scalar(@$block); $i++) {
+        my $sub_block_i = $block->[$i];
+        my $ali_block_i = $sub_block_i->get_Alignments();
+        push(@$all_ali,$ali_block_i);
+    }
+    
+    # Separated FW and RC
+    my $ali_header = {};
+    my $key = 0;
+    foreach my $header_name (@$HeaderOrder) {
+        my ($FW_ali,$RC_ali) = ([],[]);
+        foreach my $alis (@$all_ali) {
+            foreach my $ali (@$alis) {
+                next if $header_name ne $ali->get_header();
+                $ali->get_strand() eq "FW" ? push(@$FW_ali,$ali) : push(@$RC_ali,$ali);
+            }
+        }
+        $ali_header->{$key}->{name} = $header_name;
+        # Sorted FW et RC
+        @$FW_ali = sort { $a->get_LogStart() <=> $b->get_LogStop } @$FW_ali;
+        $ali_header->{$key}->{FW}   = $FW_ali;
+        @$RC_ali = sort { $a->get_LogStart() <=> $b->get_LogStop } @$RC_ali;
+        $ali_header->{$key}->{RC}   = $RC_ali;
+        $key++;
+    }
+    
+    # Create new array with ali ordonate by FW/RC and pos
+    my $new_alis = [];
+    foreach $key (sort {$a <=> $b} (keys(%$ali_header))) {
+        my $FW = $ali_header->{$key}->{FW};
+        push(@$new_alis,@$FW);
+        my $RC = $ali_header->{$key}->{RC};
+        push(@$new_alis,@$RC);
+    }
+    
+    &AdjsutAliForLog($block);
+    &AdjustAliForAli($block);
+    my $full_time = &AddTimeOfEachBlock($block);
+    $block->[0]->set_Alignments($new_alis);
+    $block->[0]->set_time($full_time);
+    $block->[0]->set_OriFusSol($initial_nbsol);
+    splice(@$block,1); #Splice block no more used.
+}
+
+sub AdjsutAliForLog {
+    my $block = shift; 
+
+    # Set AliLogArray
+    for(my $i = 0; $i < scalar(@$block); $i++) {
+        my $sub_block_i = $block->[$i];
+        my $alis      = $sub_block_i->get_Alignments();
+        my $maxBitLen = $sub_block_i->get_maxBitLength();
+        foreach my $ali (@$alis) {
+            my $AliForLog = $ali->get_AliForLog();
+            my $elem_tab = [];
+            my $len_prev = 0;
+            foreach my $maxLen (@$maxBitLen) {
+                $maxLen = 16 if $maxLen > 16;
+                my $sub = substr($AliForLog,$len_prev,$maxLen);
+                push(@$elem_tab,$sub);
+                $len_prev += ($maxLen+1);
+            }
+            my $sub_last = substr($AliForLog,($len_prev-1));
+            push(@$elem_tab,$sub_last);
+            $ali->set_AliLogArray($elem_tab);
+        }
+    }
+    
+    # Define global MaxBitLength with new result
+    my $new_maxBitLen = [];
+    for(my $i = 0; $i < scalar(@$block); $i++) {
+        my $sub_block_i  = $block->[$i];
+        my $maxBitLength = $sub_block_i->get_maxBitLength();        
+        for(my $i = 0; $i < scalar(@$maxBitLength); $i++) {
+            my $elem       = $maxBitLength->[$i];
+            $new_maxBitLen->[$i] = $elem if !$new_maxBitLen->[$i] || $new_maxBitLen->[$i] < $elem;
+        }
+    }
+    
+    # Adjust each AliForLog
+    for(my $i = 0; $i < scalar(@$block); $i++) {
+        my $sub_block_i = $block->[$i];
+        my $alis      = $sub_block_i->get_Alignments();
+        foreach my $ali (@$alis) {
+            my $elem_tab = $ali->get_AliLogArray();
+            my $new_AliForLog = "";
+            for(my $i = 0; $i < scalar(@$elem_tab); $i++) {
+                my $elem = $elem_tab->[$i];
+                my $nbSpace = !$new_maxBitLen->[$i] ? 0 : $new_maxBitLen->[$i] - length($elem) + 1; # +1 in order to add initial spce between element
+                $new_AliForLog .= $elem;
+                $new_AliForLog .= " " x $nbSpace;
+            }
+            $ali->set_AliForLog($new_AliForLog);
+        }
+    }    
+    # Adjust bracket of block 1
+    &GetBracketArrayByElem($block->[0]);
+    &AdjustSpaceintoBracketModel($block->[0],$new_maxBitLen);
+    
+}
+
+sub GetBracketArrayByElem {
+    my $first_block = shift;
+    
+    my $ini_bracket = $first_block->get_bracket();
+    my $maxBitLen   = $first_block->get_maxBitLength();
+    
+    my $elem_tab = [];
+    my $len_prev = 0;
+    foreach my $maxLen (@$maxBitLen) {
+        $maxLen = 16 if $maxLen > 16;
+        my $sub = substr($ini_bracket,$len_prev,$maxLen);
+            push(@$elem_tab,$sub);
+            $len_prev += ($maxLen+1);
+    }
+    my $sub_last = substr($ini_bracket,($len_prev-1));
+    push(@$elem_tab,$sub_last);
+    $first_block->set_BracketLogArray($elem_tab);
+}
+
+sub AdjustSpaceintoBracketModel {
+    my ($first_block,$maxBitLen) = @_;
+    
+    my $new_bracket = "";
+    my $elem_tab = $first_block->get_BracketLogArray();
+    for(my $i = 0; $i < scalar(@$elem_tab); $i++) {
+        my $elem = $elem_tab->[$i];
+        my $nbSpace = !$maxBitLen->[$i] ? 0 : $maxBitLen->[$i] - length($elem) + 1; # +1 in order to add initial spce between element
+        $new_bracket .= $elem;
+        $new_bracket .= " " x $nbSpace;
+    }
+    $first_block->set_bracket($new_bracket);
+}
+
+sub AdjustAliForAli {
+    my $block = shift;
+    
+    # Define length of each elem...
+    foreach my $sub_block (@$block) {
+        my $ModelFile = $sub_block->get_modelFile();
+        my $LinStruct  = PirObject::LinStruct->new();
+        my $model_fh   = new IO::File "<$ModelFile"
+            or die "Cannot read model output '$ModelFile': $!\n";
+        $LinStruct->ImportFromMultipleAlignment($model_fh); # will close the filehandle
+        my $idsByPos   = $LinStruct->get_idsByPos();
+        my $elemsByIds = $LinStruct->get_elemsByIds();
+        
+        my $struct               = $sub_block->get_structure();
+        my @str_array            = split(/\n/,$struct);
+        my ($str_first,$str_sec) = ($str_array[0],$str_array[1]);
+        my $FullLenSucElem       = [];
+        my $pos                  = 0;
+        for (;;) {
+            my $id  = substr($str_first,$pos,1);
+               $id .= substr($str_sec,$pos,1);
+            my $elemLength = $elemsByIds->{$id}->get_elemLength();
+            push(@$FullLenSucElem,$elemLength);
+            $pos += $elemLength;
+            last if $pos == length($str_first);
+        }
+        $sub_block->set_elemLength($FullLenSucElem);
+    }
+    
+    # Define global elemLength with new result
+    my $MaxElemLen = [];
+    for(my $i = 0; $i < scalar(@$block); $i++) {
+        my $sub_block_i  = $block->[$i];
+        my $elemLength = $sub_block_i->get_elemLength();        
+        for(my $i = 0; $i < scalar(@$elemLength); $i++) {
+            my $elem       = $elemLength->[$i];
+            $MaxElemLen->[$i] = $elem if !$MaxElemLen->[$i] || $MaxElemLen->[$i] < $elem;
+        }
+    }
+    
+    # Create an array with each elem...
+    foreach my $sub_block (@$block) {
+        my $alis     = $sub_block->get_Alignments();
+        my $elemLen  = $sub_block->get_elemLength();
+        my @gaptoend = split(/,/,$sub_block->get_gaptoend());
+        
+        my $ModelFile = $sub_block->get_modelFile();
+        my $LinStruct  = PirObject::LinStruct->new();
+        my $model_fh   = new IO::File "<$ModelFile"
+            or die "Cannot read model output '$ModelFile': $!\n";
+        $LinStruct->ImportFromMultipleAlignment($model_fh); # will close the filehandle
+        my $idsByPos   = $LinStruct->get_idsByPos();
+        my $elemsByIds = $LinStruct->get_elemsByIds();
+        
+        foreach my $ali (@$alis) {
+            my $AliForAli = $ali->get_AliForAli();
+            my $elem_tab = [];
+            my $len_prev = 0;
+            my $new_ali = "";
+            for (my $i = 0; $i < scalar(@$elemLen); $i++) {
+                my $Len = $elemLen->[$i];
+                my $sub = substr($AliForAli,$len_prev,$Len);
+                push(@$elem_tab,$sub);
+                my $id     = $idsByPos->{$len_prev};
+                $len_prev += $Len;
+                if ($Len < $MaxElemLen->[$i]) {
+                    my $first_gap = index($sub,"-") == -1  ?  $Len - 1 : index($sub,"-") - 1;
+                    my $len_diff  = $MaxElemLen->[$i] - $Len;
+                    my $to_add    = "-" x $len_diff;
+                    substr($sub,$first_gap+1,0) = $to_add;
+                    $sub = &PutGapAtEnd($sub) if (grep { $_ eq $id } @gaptoend);
+                    $new_ali     .= $sub;
+                }
+                else {
+                    $sub = &PutGapAtEnd($sub) if (grep { $_ eq $id } @gaptoend);
+                    $new_ali .= $sub;
+                }
+            }
+            $ali->set_AliAliArray($elem_tab);
+            $ali->set_AliForAli($new_ali);
+        }
+    }
+    # Adjust structure of block 1
+    &GetStructArrayByElem($block->[0]);
+    &AdjustSpaceintoStructModel($block->[0],$MaxElemLen);
+}
+
+sub GetStructArrayByElem {
+    my $first_block = shift;
+    
+    my $ini_structure = $first_block->get_structure();
+    my $elemLen       = $first_block->get_elemLength();
+    
+    my $struct               = $first_block->get_structure();
+    my @str_array            = split(/\n/,$struct);
+    my ($str_first,$str_sec) = ($str_array[0],$str_array[1]);
+    my ($elem_tab_first,$elem_tab_sec) = ([],[]);
+    my $len_prev = 0;
+    foreach my $maxLen (@$elemLen) {
+        my $sub_str_first = substr($str_first,$len_prev,$maxLen);
+        my $sub_str_sec   = substr($str_sec,$len_prev,$maxLen);
+        push(@$elem_tab_first,$sub_str_first);
+        push(@$elem_tab_sec,$sub_str_sec);
+        $len_prev += $maxLen;
+    }
+    my $elem_tab = [$elem_tab_first,$elem_tab_sec];
+    $first_block->set_StructArray($elem_tab);
+}
+
+sub AdjustSpaceintoStructModel {
+    my ($first_block,$elemLen) = @_;
+    
+    my $ModelFile = $first_block->get_modelFile();
+    my $LinStruct  = PirObject::LinStruct->new();
+    my $model_fh   = new IO::File "<$ModelFile"
+        or die "Cannot read model output '$ModelFile': $!\n";
+    $LinStruct->ImportFromMultipleAlignment($model_fh); # will close the filehandle
+    
+    my ($new_first,$new_sec) = ("","");
+    my $elem_tab = $first_block->get_StructArray();
+    my ($str_first,$str_sec) = (@$elem_tab);
+    for(my $i = 0; $i < scalar(@$str_first); $i++) {
+        my ($elem_first,$elem_sec) = ($str_first->[$i],$str_sec->[$i]);
+        my ($num_first,$num_sec)   = (substr($elem_first,0,1),substr($elem_sec,0,1));
+        my $nbAdd = !$elemLen->[$i] ? 0 : $elemLen->[$i] - length($elem_first);
+        $new_first .= $elem_first;
+        $new_first .= "$num_first" x $nbAdd;
+        $new_sec   .= $elem_sec;
+        $new_sec   .= "$num_sec"   x $nbAdd;
+    }
+    my $new_structure = "$new_first\n$new_sec\n";
+    $first_block->set_structure($new_structure);
+}
+
+sub PutGapAtEnd {
+    my $str = shift;
+    
+    my $nb_gap = length($str);
+    $str =~ s/-//g;
+    $nb_gap -= length($str);
+    my $str_gap = "-" x $nb_gap;
+    $str = "${str}$str_gap";
+    return $str;
+}
+
+sub AddTimeOfEachBlock {
+    my $block = shift;
+    my $full_time = "00:00:00";
+    foreach my $sub_block (@$block) {
+        my $sub_time = $sub_block->get_time();
+        $full_time   = &AddTime($full_time,$sub_time);
+    }
+    return $full_time;
+}
+
+sub AddTime {
+    my ($t,$t2) = @_;
+    
+    my ($hr, $min, $sec) = split /:/, $t;
+    my ($hr2, $min2, $sec2) = split /:/, $t2;
+    my $hr3 = $hr + $hr2;
+    my $min3 = $min + $min2;
+    my $sec3 = $sec + $sec2;
+    my $elapsed = ($hr3 * 3600) + ($min3 * 60) + $sec3;
+    my $hr4 = int $elapsed / 3600;
+    my $new = $elapsed % 3600 ;
+    my $min4 = int $new / 60;
+    my $sec4 = $new % 60 ;
+    my $new_time = sprintf "%02d:%02d:%02d",$hr4,$min4,$sec4;
+    
+    return $new_time;
+}
+
 ################
 #  For Output  #
 ################
@@ -2032,6 +2451,7 @@ sub CreateRNAPredictions {
     my $csmFile = "$TMP_DIR/$filename.csm.tmp";
     my $xmlFile = "$TMP_DIR/$filename.xml.tmp";
     my $apcFile = "$TMP_DIR/$filename.apc.tmp";
+    my $faaFile = "$TMP_DIR/$filename.faa.tmp";
 
     
     open (ALIFILE, ">>$aliFile")
@@ -2040,9 +2460,11 @@ sub CreateRNAPredictions {
         or die "Can't write to .log.tmp file '$logFile': $!\n";
     open (CSMFILE, ">>$csmFile")
         or die "Can't write to .csm.tmp file '$csmFile': $!\n";
+    open (FAAFILE, ">>$faaFile")
+        or die "Can't write to .csm.tmp file '$faaFile': $!\n";
 
     # Treat .ali.tmp .log.tmp and .ali.tmp .csm.tmp
-    my ($ali_str,$log_str,$csm_str) = ("","","");
+    my ($ali_str,$log_str,$csm_str,$faa_str) = ("","","","");
     my $AllRNAPred = [];
     my $AllRNAPredictionList = [];
     my $nbTotRes   = 0;
@@ -2078,8 +2500,8 @@ sub CreateRNAPredictions {
             
             my $predictlist = [];
             my $aliString3  = ""; #just to advance
-            ($predictlist,$rnaString,$aliString3,$logString,$csmString) 
-                = &AddInfoForeachAli($Alignments,$aliString3,$rnaString,$logString,$csmString,$block_name,$comment,$takeAliCoord);
+            ($predictlist,$rnaString,$aliString3,$logString,$csmString,$faa_str)
+                = &AddInfoForeachAli($Alignments,$aliString3,$rnaString,$logString,$csmString,$faa_str,$block_name,$comment,$takeAliCoord);
             
             $RNA_summary .= $rnaString;
             my $aliString = $aliString1.$aliString2.$aliString3;
@@ -2108,6 +2530,7 @@ sub CreateRNAPredictions {
     print ALIFILE "$ali_str" if $ali_str;
     print LOGFILE "$log_str" if $log_str;
     print CSMFILE "$csm_str" if $csm_str;
+    print FAAFILE "$faa_str" if $faa_str;
     
     &CreateAPCFile($AllRNAPred,$apcFile);
     
@@ -2123,8 +2546,9 @@ sub CreateRNAPredictions {
     close (ALIFILE);
     close (LOGFILE);
     close (CSMFILE);
+    close (FAAFILE);
     
-    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile,$apcFile) if !$MAIL_ADR;
+    &CopyResults($aliFile,$logFile,$csmFile,$xmlFile,$apcFile,$faaFile) if !$MAIL_ADR;
     return ($short_summary,$screen_summary,$mail_summary);
 }
 
@@ -2147,7 +2571,7 @@ sub CreateSummary {
         for(my $i = 0; $i < scalar(@$block); $i++) {
             my $sub_block  = $block->[$i];
             my $comment    = $sub_block->get_comment();
-            my $nbOriSol   = $sub_block->get_OriSol();
+            my $nbOriSol   = $sub_block->get_OriFusSol() || $sub_block->get_OriSol();
             my $time       = $sub_block->get_time();
             my $Alignments = $sub_block->get_Alignments();
             my $nbRetSol   = scalar(@$Alignments);
@@ -2208,7 +2632,7 @@ sub CreateHeadString {
     my $aliString1 = $headString;
     
     my $aliString2 = ">structure\n$structure";
-       $aliString2 .= ">consensus\n$consensus\n";
+    # $aliString2 .= ">consensus\n$consensus\n";
     
     my $logString = $headString;
     $logString =~ s/Alignment/Condensed alignment/;
@@ -2237,28 +2661,31 @@ sub CreateHeadString {
 }
 
 sub AddInfoForeachAli {
-    my ($Alignments,$aliString,$rnaString,$logString,$csmString,$block_name,$comment,$takeAliCoord) = @_;
+    my ($Alignments,$aliString,$rnaString,$logString,$csmString,$faaString,$block_name,$comment,$takeAliCoord) = @_;
     
     my $predictlist = [];
-    my $count = 1;
     my $prev_head = "";
+    
+    my $unique_header = GetMultipleHeader($Alignments);
+    
     foreach my $ali (@$Alignments) {
-        my $RNAPrediction = PirObject::RNAPrediction->new();
-        my $HeadForAli    = $ali->get_HeadForAli();
-        my $AliForAli     = $ali->get_AliForAli();
+        my $RNAPrediction    = PirObject::RNAPrediction->new();
+        my $HeadForAli       = $ali->get_HeadForAli();
+        my $AliForAli        = $ali->get_AliForAli();
         my @HeadForAli_elems = split(/ /,$HeadForAli);
-        my $last_elem     = $HeadForAli_elems[-1];
-        my @path_elems    = split(/\/+/,$last_elem);
-        my $last_elem_path = $path_elems[-1];
-        $HeadForAli       =~ s/$last_elem/$last_elem_path/;
-        $aliString       .= "$HeadForAli"."$AliForAli\n";
-        my $HeadForLog    = $ali->get_HeadForLog();
-        my $AliForLog     = $ali->get_AliForLog();
+        my $last_elem        = $HeadForAli_elems[-1];
+        my @path_elems       = split(/\/+/,$last_elem);
+        my $last_elem_path   = $path_elems[-1];
+        $HeadForAli          =~ s/$last_elem/$last_elem_path/;
+        $aliString          .= "$HeadForAli"."$AliForAli\n";
+        my $HeadForLog       = $ali->get_HeadForLog();
+        my $AliForLog        = $ali->get_AliForLog();
         
         # Adjust Number and reverse start and stop if RC
         my @HeadElem = split(/\s+/, $HeadForLog);
         my @PosElem  = split(/\.\./, $HeadElem[4]);
-        $HeadForLog = sprintf ("%-30s| %10s %9s %9s..%-9s %s %3s ",
+        my $count    = $HeadElem[6];
+        $HeadForLog  = sprintf ("%-30s| %10s %9s %9s..%-9s %s %3s ",
 				$HeadElem[0],
 				$HeadElem[2],
 				$HeadElem[3],
@@ -2351,13 +2778,44 @@ sub AddInfoForeachAli {
                     $AcSeq ||"",
                     $evalue);
         }
+        
+        $AcAa  = $AcAa  || "";
+        $AcSeq = $AcSeq || "";
+        my $lc = lc($AcSeq);
+        my $header_10      = substr("${AcAa}${lc}$contigname",0,10);
+        my $nb_same_header = defined($unique_header->{$header_10}) ? $unique_header->{$header_10} : "a";
+        $unique_header->{$header_10}--;
+        $faaString .= ">${AcAa}${nb_same_header}${lc}$contigname\n$AliForAli\n";
+        
         push(@$predictlist,$RNAPrediction);
         $prev_head = $HeadElem[0];
-        $count++;
     }
     $rnaString .= "\n" if $rnaString;
-    return ($predictlist,$rnaString,$aliString,$logString,$csmString);
+    
+    return ($predictlist,$rnaString,$aliString,$logString,$csmString,$faaString);
 }
+
+sub GetMultipleHeader {
+    my $Alignments = shift;
+    
+    my $unique_header = {};
+    foreach my $ali (@$Alignments) {
+        my $AcAa       = $ali->get_AcAa()        || "";
+        my $AcSeq      = lc($ali->get_AcTriNt()) || "";
+        my $contigname = $ali->get_header();
+        next if $AcAa eq "" || $AcSeq eq "";
+        my $header = "${AcAa}${AcSeq}$contigname";
+           $header = substr($header,0,10);
+       $unique_header->{$header}++;
+    }
+    
+    foreach my $header (keys %$unique_header) {
+        my $nb_same_header = $unique_header->{$header};
+        delete($unique_header->{$header}) if $nb_same_header == 1;
+    }
+    return $unique_header;
+}
+
 
 sub CreateAPCFile {
     my ($AllRNAPred,$apcFile) = @_;
@@ -2507,6 +2965,49 @@ sub ListOfEmptySeq {
     print "\nList of sequences without solution in file: NoSolution\n" if !$MAIL_ADR;
 }
 
+sub MessageForMissingRes {
+    my $missingList = shift;
+    
+    my $message = $MAIL_ADR ? "<PRE><FONT face='courier' size=3>" : "";
+    foreach my $missingAli (@$missingList) {
+        foreach my $sub_missingAli (@$missingAli) {
+            my $inclusion = $sub_missingAli->[-1];
+            splice(@$sub_missingAli, -1, 1);
+            $message .= "There are problems with inclusion $inclusion, following alignments have no equivalent in general model.\n";
+            foreach my $Ali (@$sub_missingAli) {
+                my $HeadForLog = $Ali->get_HeadForLog();
+                my $AliForLog  = $Ali->get_AliForLog();
+                 $message .= "$HeadForLog $AliForLog\n"
+            }
+        }
+    }
+    $message .= $MAIL_ADR ? "</FONT></PRE>" : "";
+    
+    if ($MAIL_ADR) {
+        my $file  = "$TMP_DIR/MissingAli.txt";
+        my $outfh = new IO::File ">$file"
+            or die "Can't write to file '$file': $!\n";
+        print $outfh $message;
+        $outfh->close();
+        my $subject   = "RNAweasel missing alignments";
+        my $mailErr   = "$TMP_DIR/mailErrMissing";
+        my $mailOut   = "$TMP_DIR/mailOutMissing";
+        
+        my $cmd = "perl /services/WWW/cgi-bin/RNAweasel/bin/sendmail.pl -f \'rnaweasel\@gmail.com\' -t \'rnaweasel\@gmail.com\' -s \'$subject\' -a \'$file\'";
+        print STDERR $cmd if $DEBUG;
+        my $ret = system("$cmd 2> $mailErr");
+        
+        if (($ret >> 8) > 1) {
+            print STDERR "There was an error sending mail.\n";
+            print STDERR "Content of STDERR output:\n";
+            system("cat",$mailErr);
+        }
+    }
+    else {
+        print "\n$message\n";
+    }
+}
+
 sub sendMail {
     my $filename = basename($DATAFILE);
     
@@ -2530,9 +3031,17 @@ sub sendMail {
 
 sub CopyResults {
     # Copy results to user's selected output files
-    my ($aliFile,$logFile,$csmFile,$xmlFile,$apcFile) = @_;
+    my ($aliFile,$logFile,$csmFile,$xmlFile,$apcFile,$faaFile) = @_;
     
-    $REPORTFILE = "${DATAFILE}_${LIST_OF_SEARCHED}.log" if $LOGOUTFILE_NOTDEF;
+    if ($LOGOUTFILE_NOTDEF) {
+        my $fileName = basename($DATAFILE);
+        $REPORTFILE  = "${fileName}_${LIST_OF_SEARCHED}.log";
+        my $i = 1;
+        while (-f $REPORTFILE) {
+            $REPORTFILE = "${fileName}_${LIST_OF_SEARCHED}_$i.log";
+            $i++
+        }
+    }
     
     if ($ALIGNEDOUTFILE) {
         my $infh  = new IO::File "<$aliFile"
@@ -2566,6 +3075,13 @@ sub CopyResults {
         my $infh  = new IO::File "<$apcFile"
             or die "Can't read back report output file '$apcFile': $!\n";
         my $outfh = &PrettyOutputStream("APC", $APCOUTFILE);
+        &CopyStream($infh,$outfh);
+    }
+    
+    if ($FAAOUTFILE) {
+        my $infh  = new IO::File "<$faaFile"
+            or die "Can't read back aligned output file '$faaFile': $!\n";
+        my $outfh = &PrettyOutputStream("FASTA", $FAAOUTFILE);
         &CopyStream($infh,$outfh);
     }
 }

@@ -19,9 +19,12 @@
 #       pos_ac = "13"
 # Between "Item" and "EndItem" if the anticodon is the 13 element of the model.
 #
-# $Id: RNAfinderFileForMenu.pir,v 1.4 2009/11/07 00:21:40 nbeck Exp $
+# $Id: RNAfinderFileForMenu.pir,v 1.5 2011/01/20 22:18:10 nbeck Exp $
 #
 # $Log: RNAfinderFileForMenu.pir,v $
+# Revision 1.5  2011/01/20 22:18:10  nbeck
+# Added function for model fusion (for tRNA).
+#
 # Revision 1.4  2009/11/07 00:21:40  nbeck
 # Changed output format.
 #
@@ -48,7 +51,7 @@ List           	        array	        <MenuList>      Menu list
 - EndFieldsTable
 - Methods
 
-our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.4 2009/11/07 00:21:40 nbeck Exp $';
+our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.5 2011/01/20 22:18:10 nbeck Exp $';
 our ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 
 # Sample format of text file
@@ -116,13 +119,36 @@ sub ImportFromTextFile {
         my $Order = $1;
         shift(@file);
         $count_line++;
-
+        
+        # Expect "ToFus" 
+        while (@file && $file[0] =~ m/^\s*$|^\s*#/){
+                shift(@file);
+                $count_line++;
+        }
+        die "Error: unparsable line '$count_line' in '$filename' (expected \"ToFus=\"), got:\n$line"
+            if ($file[0] !~ m/^\s*ToFus?\s*=\s*(\w+)\s*$/i);
+        my $ToFus = $1;
+        shift(@file);
+        $count_line++;
+        
+        # Expect "Inclusion" 
+        while (@file && $file[0] =~ m/^\s*$|^\s*#/){
+                shift(@file);
+                $count_line++;
+        }
+        die "Error: unparsable line '$count_line' in '$filename' (expected \"Inclusion=\"), got:\n$line"
+            if ($file[0] !~ m/^\s*Inclusion?\s*=\s*(.+)\n$/i);
+        my $Inclusion = &TreatInclusionList($1);
+        shift(@file);
+        $count_line++;
         
         my $List = new PirObject::MenuList(
             Set     => {},
             OriName => $name,
             Comment => $ModelComment,
-            Order   => $Order
+            Order   => $Order,
+            ToFus   => $ToFus,
+            Inclusion => $Inclusion
         );
         
         my $ItemSet = $List->get_Set();
@@ -140,7 +166,7 @@ sub ImportFromTextFile {
             $count_line++;
             
             $Item_counter++;
-            my $autorized_fields = ["erpin_arg","model_file","label","pos_ac","comment","module","cutoff"];
+            my $autorized_fields = ["erpin_arg","model_file","label","pos_ac","comment","module","cutoff","gap_to_end"];
             my $Item = new PirObject::Item();
             while (@file && $file[0] !~ m/^\s*EndItem\s*$/i) {
                 my $line_b = shift(@file);
@@ -162,6 +188,7 @@ sub ImportFromTextFile {
                 $Item->set_AcId($value)      if $field eq "pos_ac";
                 $Item->set_module($value)    if $field eq "module";
                 $Item->set_comment($value)   if $field eq "comment";
+                $Item->set_gaptoend($value)  if $field eq "gap_to_end";
             }
             unshift(@file,"(EOF)\n") unless @file; # for error message
             my $endcomkeyword = shift(@file);
@@ -178,4 +205,36 @@ sub ImportFromTextFile {
     }
     $self->set_List($MenuList);
     $self;
+}
+
+sub TreatInclusionList {
+    my $str = shift;
+    
+    my $cnt_item = {};
+    $str =~ s/\s+//g;
+    my $Inclusion = ();
+    if ($str eq "0") {
+        push(@$Inclusion,$str);
+    }
+    else {
+        my @tab = split(/,/,$str);
+        foreach my $entry (@tab) {
+            $entry = "$2>$1" if $entry =~ m/(\d+)<(\d+)/;
+            if ($entry =~ m/(\d+)>(\d+)/) {
+                push(@$Inclusion,$entry);
+                $cnt_item->{$1}++;
+                $cnt_item->{$2}++;
+            }
+            else {
+                die "Inclusion string '$str' have wrong format in RNAfinder.cfg\n";
+            }
+        }
+    }
+    
+    foreach my $cnt (keys %$cnt_item) {
+        my $value = $cnt_item->{$cnt};
+        next if $value ==1;
+        die "Inclusion string '$str' have wrong format in RNAfinder.cfg\n";
+    }
+    return $Inclusion;
 }
