@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.35 2011/01/20 22:18:10 nbeck Exp $
+#    $Id: RNAfinder,v 1.36 2011/01/25 21:15:51 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.36  2011/01/25 21:15:51  nbeck
+#    Removed inclusion, added comments for MFannot, changed output format.
+#
 #    Revision 1.35  2011/01/20 22:18:10  nbeck
 #    Added function for model fusion (for tRNA).
 #
@@ -164,7 +167,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.35 2011/01/20 22:18:10 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.36 2011/01/25 21:15:51 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -542,11 +545,10 @@ if ($PARALLELISM > $NB_PROC) {
 my $Ret_Rseqs = {};
 my ($nr_genome,$Rseqs,$SubToFullId,$HeadOrder) = &CreateNrGenome();
 my $AllErpinResult = &CreateNrModelAndRunErpin();
-my $NoFoundInSup   = &SelectResult($AllErpinResult,$HeadOrder);
+&SelectResult($AllErpinResult,$HeadOrder);
 my ($short_summary,$screen_summary,$mail_summary) = &CreateRNAPredictions($AllErpinResult);
 &ScreenOutput($mail_summary,$screen_summary);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
-&MessageForMissingRes($NoFoundInSup) if scalar(@$NoFoundInSup) != 0;
 &sendMail() if $MAIL_ADR;
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG; 
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
@@ -790,9 +792,8 @@ sub CreateNrModelAndRunErpin {
         &DefineCutoffForAllItems($ItemSet,$FileForCut) if $POURCENTISDEF;
         &RunErpinForAllItems($ItemSet);
         my $toFus     = $model_list->get_ToFus();
-        my $inclusion = $model_list->get_Inclusion();
         my $erpin_res = &CreateErpinResultForAllItems($ItemSet);
-        $AllErpinResult->{"$order"} = [$name,$erpin_res,$toFus,$inclusion];
+        $AllErpinResult->{"$order"} = [$name,$erpin_res,$toFus];
     }
     return $AllErpinResult;
 }
@@ -982,6 +983,7 @@ sub CreateErpinResultForAllItems {
         my $time          = $Item->get_time();
         my $comment       = $Item->get_comment();
         my $gaptoend      = $Item->get_gaptoend();
+        my $commentForMFa = $Item->get_commentForMFa();
         my $erpinSuff     = $erpinOut;
            $erpinSuff     =~ s/.out$//;
         my $erpinLog      = "$erpinSuff.log";
@@ -999,6 +1001,7 @@ sub CreateErpinResultForAllItems {
         $erpinResult->set_Label($label);
         $erpinResult->set_gaptoend($gaptoend);
         $erpinResult->set_comment($comment);
+        $erpinResult->set_commentForMFa($commentForMFa);
         
         # Add anticodon information
         my $Ac_id         = $Item->get_AcId();
@@ -1137,7 +1140,7 @@ sub MakeModel {
     $res_log .=  "*************************************************\n";
     $res_log .= "Condensed alignment for $outputModel\n";
     $res_log .= "*************************************************\n";
-    $res_log .= "$numModels matches\n";
+    $res_log .= "$numModels match(es)\n";
     $res_log .= "Label: $label\n" if defined $label;
     $res_log .= "\n";
     
@@ -1854,19 +1857,15 @@ sub SelectResult {
     my ($AllErpinResult,$HeaderOrder) = @_;
     print "\nSelect best results for overlapping matches.\n";
     # Make results selection
-    my $All_NoFoundInSup = [];
     foreach my $block_num (keys %$AllErpinResult) {
         my $bl_name_block = $AllErpinResult->{$block_num};
         my $block = $bl_name_block->[1];
         next if scalar(@$block) <= 1;
         my $name = $bl_name_block->[0];
         my $tot_iniSol    = &TotIniSol($block);
-        my $inclusion     = $bl_name_block->[3];
-        my ($NoFoundInSup,$initial_nbsol) = &RemoveAlignment($block,$tot_iniSol,$name,$inclusion);
-        push(@$All_NoFoundInSup,$NoFoundInSup) if scalar(@$NoFoundInSup) != 0;
+        my ($initial_nbsol) = &RemoveAlignment($block,$tot_iniSol,$name);
         &MakeFusionResult($block,$HeaderOrder,$initial_nbsol) if $bl_name_block->[2] == 1;
     }
-    return $All_NoFoundInSup;
 }
 
 sub TotIniSol {
@@ -1881,7 +1880,7 @@ sub TotIniSol {
 }
 
 sub RemoveAlignment {
-    my ($block,$tot_iniSol,$name,$inclusion) = @_;
+    my ($block,$tot_iniSol,$name) = @_;
     
     for(my $i = 0; $i < scalar(@$block); $i++) {
         my $sub_block_i = $block->[$i];
@@ -1931,8 +1930,6 @@ sub RemoveAlignment {
                     
                     next if !$isOv; # if OV
                     my ($str1,$str2) = ("$i>$j","$j>$i");
-                    $ali_i->set_FoundInSupModel(1) if (grep(/$str1/,@$inclusion));
-                    $ali_j->set_FoundInSupModel(1) if (grep(/$str2/,@$inclusion));
                     $tot_iniSol--;
                     if ($iIsj == 1) {
                         $evalue_i = "1e-100" if $evalue_i =~ m/^([\+\-]?)([\d\.]*)(?:e([\-]?00))?$/x;
@@ -1958,41 +1955,7 @@ sub RemoveAlignment {
                               : $sub_block_i->set_Alignments([]) ;
     }
     
-    my $NoFoundInSup = &CompletNoFoundInSup($block,$inclusion);
-    return ($NoFoundInSup,$tot_iniSol);
-}
-
-sub CompletNoFoundInSup {
-    my ($block,$inclusions) = @_;
-    
-    my $NoFound = [];
-    return [] if $inclusions->[0] eq "0";
-    for(my $i = 0; $i < scalar(@$block); $i++) {
-        my $sub_block_i = $block->[$i];
-        my $ali_block_i = $sub_block_i->get_Alignments();
-        my $inclusion   = GetInclusion($inclusions,$i);
-        next if !$inclusion;
-        my $NoFoundForI = [];
-        foreach my $ali (@$ali_block_i) {
-            next if $ali->get_FoundInSupModel();
-            push(@$NoFoundForI,$ali);
-        }
-        if (scalar(@$NoFoundForI) != 0) {
-            push(@$NoFoundForI,$inclusion);
-            push(@$NoFound,$NoFoundForI);
-        }
-    }
-    return $NoFound;
-}
-
-sub GetInclusion {
-    my ($inclusions,$i) = @_;
-    
-    foreach my $inclusion (@$inclusions) {
-        next if $inclusion !~ m/^$i>/;
-        return $inclusion;
-    }
-    return 0;
+    return ($tot_iniSol);
 }
 
 sub CompareModBlock {
@@ -2477,16 +2440,17 @@ sub CreateRNAPredictions {
         my $block_name = $erpin_res->[0];
         my $block      = $erpin_res->[1];
         for(my $i = 0; $i < scalar(@$block); $i++) {
-            my $sub_block   = $block->[$i];
-            my $Alignments  = $sub_block->get_Alignments();
-            my $nb_ali      = scalar(@$Alignments);
+            my $sub_block     = $block->[$i];
+            my $Alignments    = $sub_block->get_Alignments();
+            my $nb_ali        = scalar(@$Alignments);
             next if $nb_ali == 0;
-            my $numItem     = $sub_block->get_NumItem();
-            my $label       = $sub_block->get_Label();
-            my $bracket     = $sub_block->get_bracket();
-            my $structure   = $sub_block->get_structure();
-            my $consensus   = $sub_block->get_consensus();
-            my $comment     = $sub_block->get_comment();
+            my $numItem       = $sub_block->get_NumItem();
+            my $label         = $sub_block->get_Label();
+            my $bracket       = $sub_block->get_bracket();
+            my $structure     = $sub_block->get_structure();
+            my $consensus     = $sub_block->get_consensus();
+            my $comment       = $sub_block->get_comment();
+            my $commentForMFa = $sub_block->get_commentForMFa() || "";
             
             my $takeAliCoord  = 0; 
             $takeAliCoord  = 1 if $comment =~ m/rns/ && $comment =~ m/complete/;
@@ -2501,7 +2465,7 @@ sub CreateRNAPredictions {
             my $predictlist = [];
             my $aliString3  = ""; #just to advance
             ($predictlist,$rnaString,$aliString3,$logString,$csmString,$faa_str)
-                = &AddInfoForeachAli($Alignments,$aliString3,$rnaString,$logString,$csmString,$faa_str,$block_name,$comment,$takeAliCoord);
+                = &AddInfoForeachAli($Alignments,$aliString3,$rnaString,$logString,$csmString,$faa_str,$block_name,$comment,$takeAliCoord,$commentForMFa);
             
             $RNA_summary .= $rnaString;
             my $aliString = $aliString1.$aliString2.$aliString3;
@@ -2563,6 +2527,7 @@ sub CreateSummary {
     
     $screen_summary .= sprintf("\n%-30s %15s %15s \n%-30s %15s %15s", "","Initial #","Retained #","","of solution","of solution");
     my $mail_pre = "<PRE><FONT face='courier' size=4>" if $MAIL_ADR;
+    $short_summary .= "\nIdentified RNA structure\n";
     $short_summary .= sprintf("\n%-30s %15s \n%-30s %15s", "","Retained #","","of solution");
     
     foreach my $res_num (sort keys %$AllResult) {
@@ -2590,6 +2555,7 @@ sub CreateSummary {
         $screen_summary .= sprintf("\n%-30s %15s %15s\n", "Total number of introns","","$nbTotRes");
         $short_summary  .= "\n----------------------------------------------";
         $short_summary  .= sprintf("\n%-30s %15s\n", "Total number of introns","$nbTotRes");
+        $short_summary  .= "\n******************************************************************************\n";
     }
     else {
         $screen_summary .= "\n";
@@ -2608,22 +2574,25 @@ sub CreateHeadString {
     my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i,$takeAliCoord) = @_;
     
     my ($headString,$rnaString) = ("","");
+    my $name = $block_name;
+       $name =~ s/_/ /g;
+       $name =~ s/tRNA/tRNA\(s\)/g;
     if (defined($MAIL_ADR)) {
         if ($i == 0) {
             $headString .=  "*************************************************\n";
-            $headString .=  "Alignment for $block_name\n";
+            $headString .=  "Alignment for $name\n";
             $headString .=  "*************************************************\n\n";
-            $headString .=  "$nb_ali matches for $comment\n\n";
+            $headString .=  "$nb_ali match(es) for $comment\n\n";
         }
         else {
-            $headString .=  "$nb_ali matches for $comment\n\n";
+            $headString .=  "$nb_ali match(es) for $comment\n\n";
         }
     }
     else {
         $headString .=  "*************************************************\n";
-        $headString .=  "Alignment for $block_name item $numItem\n";
+        $headString .=  "Alignment for $name item $numItem\n";
         $headString .=  "*************************************************\n\n";
-        $headString .=  "There are $nb_ali matches for $comment\n";
+        $headString .=  "There are $nb_ali match(es) for $comment\n";
         $headString .=  "Processing label: $label\n" if defined $label;
         $headString .=  "\n";
     
@@ -2642,10 +2611,15 @@ sub CreateHeadString {
     $logString .=  $bracket . "\n";
     
     if ($block_name =~ m/tRNA/i) {
-        $rnaString .= "List of identified tRNAs prediction of complete structure, including discriminator position :\n\n";
-        $rnaString .=  "                                               tRNA   tRNA tRNA  Anti  \n";
-        $rnaString .=  "Species name                   tRNA # Strand  Begin    End Type Codon  E-value\n";
-        $rnaString .=  "------------------------------ ------ ------ ------ ------ ---- ----- --------\n";
+        if ($block_name =~ m/^tRNA$/) {
+            $rnaString .= "List of identified $comment (positions including discriminator) :\n\n";
+            $rnaString .=  "                                               tRNA   tRNA tRNA  Anti  \n";
+            $rnaString .=  "Species name                   tRNA # Strand  Begin    End Type Codon  E-value\n";
+            $rnaString .=  "------------------------------ ------ ------ ------ ------ ---- ----- --------\n";
+        }
+        else {
+            $rnaString .= "+ $comment\n";
+        }
     }
     elsif ($takeAliCoord != 0) {
         $rnaString .= "List of identified $comment prediction of complete structure :\n\n";
@@ -2661,7 +2635,7 @@ sub CreateHeadString {
 }
 
 sub AddInfoForeachAli {
-    my ($Alignments,$aliString,$rnaString,$logString,$csmString,$faaString,$block_name,$comment,$takeAliCoord) = @_;
+    my ($Alignments,$aliString,$rnaString,$logString,$csmString,$faaString,$block_name,$comment,$takeAliCoord,$commentForMFa) = @_;
     
     my $predictlist = [];
     my $prev_head = "";
@@ -2670,6 +2644,7 @@ sub AddInfoForeachAli {
     
     foreach my $ali (@$Alignments) {
         my $RNAPrediction    = PirObject::RNAPrediction->new();
+        $RNAPrediction->set_commentForMFa($commentForMFa) if $commentForMFa ne "";
         my $HeadForAli       = $ali->get_HeadForAli();
         my $AliForAli        = $ali->get_AliForAli();
         my @HeadForAli_elems = split(/ /,$HeadForAli);
@@ -2695,12 +2670,12 @@ sub AddInfoForeachAli {
                 $count);
         
         # Add blank line in order to separe contig
-        $logString       .= $prev_head && $prev_head ne $HeadElem[0] ? 
-                            "\n$HeadForLog"."$AliForLog\n" :
-                            "$HeadForLog"."$AliForLog\n";
-        $csmString       .= "------------------\n";
+        $logString     .= $prev_head && $prev_head ne $HeadElem[0] ? 
+                          "\n$HeadForLog"."$AliForLog\n" :
+                          "$HeadForLog"."$AliForLog\n";
+        $csmString     .= "------------------\n";
         
-        my $RNA_num       = $ali->get_aliNumber();
+        my $RNA_num    = $ali->get_aliNumber();
         
         my $AcAa       = $ali->get_AcAa();
         if (defined($AcAa)) {
@@ -2836,7 +2811,8 @@ sub CreateAPCFile {
         
         foreach my $prediction (@$rnapredictions){
             my ($annot,$annot_ac) = &CreateAnnotPair($prediction,$name,$label);
-            my $contig = $prediction->get_contigname();
+            my $contig            = $prediction->get_contigname();
+
             
             # Code hash in order to find contig name and genename
             my $annotpairs = undef;
@@ -2889,6 +2865,7 @@ sub CreateAnnotPair {
     my $start           = $prediction->get_start();
     my $stop            = $prediction->get_stop();
     my $strand          = $prediction->get_strand();
+    my $commentForMFa   = $prediction->get_commentForMFa() || "";
     
     my $arrow = $strand eq "+" ? "==>" : "<=="  ;
        ($start,$stop)        = ($stop,$start) if $strand eq "-";
@@ -2920,8 +2897,11 @@ sub CreateAnnotPair {
                          startline => $startline,
                          endline   => $endline,
                          score     => $evalue,
-                         idbyRNA   => 1
+                         idbyRNA   => 1,
                          );
+
+    $annot->set_RNAcomment($commentForMFa) if $commentForMFa ne "";
+    
     my $annot_ac;
     if ($name =~ m/tRN/i){                        
      $annot_ac    = new PirObject::AnnotPair (
@@ -2963,49 +2943,6 @@ sub ListOfEmptySeq {
     
     system("cp","$TMP_DIR/NoSolution","./NoSolution") if !$MAIL_ADR;
     print "\nList of sequences without solution in file: NoSolution\n" if !$MAIL_ADR;
-}
-
-sub MessageForMissingRes {
-    my $missingList = shift;
-    
-    my $message = $MAIL_ADR ? "<PRE><FONT face='courier' size=3>" : "";
-    foreach my $missingAli (@$missingList) {
-        foreach my $sub_missingAli (@$missingAli) {
-            my $inclusion = $sub_missingAli->[-1];
-            splice(@$sub_missingAli, -1, 1);
-            $message .= "There are problems with inclusion $inclusion, following alignments have no equivalent in general model.\n";
-            foreach my $Ali (@$sub_missingAli) {
-                my $HeadForLog = $Ali->get_HeadForLog();
-                my $AliForLog  = $Ali->get_AliForLog();
-                 $message .= "$HeadForLog $AliForLog\n"
-            }
-        }
-    }
-    $message .= $MAIL_ADR ? "</FONT></PRE>" : "";
-    
-    if ($MAIL_ADR) {
-        my $file  = "$TMP_DIR/MissingAli.txt";
-        my $outfh = new IO::File ">$file"
-            or die "Can't write to file '$file': $!\n";
-        print $outfh $message;
-        $outfh->close();
-        my $subject   = "RNAweasel missing alignments";
-        my $mailErr   = "$TMP_DIR/mailErrMissing";
-        my $mailOut   = "$TMP_DIR/mailOutMissing";
-        
-        my $cmd = "perl /services/WWW/cgi-bin/RNAweasel/bin/sendmail.pl -f \'rnaweasel\@gmail.com\' -t \'rnaweasel\@gmail.com\' -s \'$subject\' -a \'$file\'";
-        print STDERR $cmd if $DEBUG;
-        my $ret = system("$cmd 2> $mailErr");
-        
-        if (($ret >> 8) > 1) {
-            print STDERR "There was an error sending mail.\n";
-            print STDERR "Content of STDERR output:\n";
-            system("cat",$mailErr);
-        }
-    }
-    else {
-        print "\n$message\n";
-    }
 }
 
 sub sendMail {
