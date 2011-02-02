@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.36 2011/01/25 21:15:51 nbeck Exp $
+#    $Id: RNAfinder,v 1.37 2011/02/02 21:34:44 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.37  2011/02/02 21:34:44  nbeck
+#    Changed way to make models fusion, removed inclusion.
+#
 #    Revision 1.36  2011/01/25 21:15:51  nbeck
 #    Removed inclusion, added comments for MFannot, changed output format.
 #
@@ -167,7 +170,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.36 2011/01/25 21:15:51 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.37 2011/02/02 21:34:44 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -778,11 +781,17 @@ sub DumpFormatedSeq {
 sub CreateNrModelAndRunErpin {
     my $AllErpinResult = {};
     
-    my $FileForCut = &CreateFileForCutoff if $POURCENTISDEF;
+    # First test availability of models
     foreach my $name (sort(keys %$NAME_LIST)) {
         my @list = split(/\|/, $NAME_LIST->{$name});
         my $model_list = $MENU_LIST->{lc($name)};
         die "No model found for '$name'\n" if !$model_list;
+    }
+    
+    my $FileForCut = &CreateFileForCutoff if $POURCENTISDEF;
+    foreach my $name (sort(keys %$NAME_LIST)) {
+        my @list = split(/\|/, $NAME_LIST->{$name});
+        my $model_list = $MENU_LIST->{lc($name)};
         my $order      = $model_list->get_Order();
         my $ItemSet    = $model_list->{'Set'};
         print "\nProcessing $name\n";
@@ -1862,25 +1871,28 @@ sub SelectResult {
         my $block = $bl_name_block->[1];
         next if scalar(@$block) <= 1;
         my $name = $bl_name_block->[0];
-        my $tot_iniSol    = &TotIniSol($block);
-        my ($initial_nbsol) = &RemoveAlignment($block,$tot_iniSol,$name);
-        &MakeFusionResult($block,$HeaderOrder,$initial_nbsol) if $bl_name_block->[2] == 1;
+        my $OV_cnt = &RemoveAlignment($block,$name);
+        $bl_name_block->[3] = $OV_cnt;
     }
-}
-
-sub TotIniSol {
-    my $block = shift; 
-    
-    my $tot_iniSol = 0;
-    foreach my $sub_block (@$block) {
-         my $alis = $sub_block->get_Alignments();
-         $tot_iniSol += scalar(@$alis);
+    # Make fusion.
+    foreach my $block_num (keys %$AllErpinResult) {
+        my $bl_name_block = $AllErpinResult->{$block_num};
+        next if $bl_name_block->[2] == 0;
+        my $erpin_block = $bl_name_block->[1];
+        $bl_name_block->[1] = &MakeFus($erpin_block,$HeaderOrder,$bl_name_block->[2],$bl_name_block->[3]);
     }
-    return $tot_iniSol;
 }
 
 sub RemoveAlignment {
-    my ($block,$tot_iniSol,$name) = @_;
+    my ($block,$name) = @_;
+    
+    my $OV_cnt = {};
+    # Make count before remove.
+    for(my $i = 0; $i < scalar(@$block); $i++) {
+        my $sub_block_i = $block->[$i];
+        my $ali_block_i = $sub_block_i->get_Alignments();
+        $OV_cnt->{$i}->{$i} = scalar(@$ali_block_i);
+    }
     
     for(my $i = 0; $i < scalar(@$block); $i++) {
         my $sub_block_i = $block->[$i];
@@ -1914,10 +1926,10 @@ sub RemoveAlignment {
                 # Reverse loop on ali_block j
                 for (my $j_ali = @$ali_block_j-1 ; $j_ali >= 0 ; $j_ali--) {
                     next if $delete_i == 1;
-                    my $ali_j = $ali_block_j->[$j_ali];
+                    my $ali_j   = $ali_block_j->[$j_ali];
                     
-                    my $head_i = $ali_i->get_header();
-                    my $head_j = $ali_j->get_header();
+                    my $head_i  = $ali_i->get_header();
+                    my $head_j  = $ali_j->get_header();
                     my $headL_i = $ali_i->get_HeadForLog();
                     my $headL_j = $ali_j->get_HeadForLog();
                     next if $head_i ne $head_j;
@@ -1929,22 +1941,24 @@ sub RemoveAlignment {
                     my $isOv = &OverlappingRegions($seqLen,$start_i,$stop_i,">",$start_j,$stop_j,">");
                     
                     next if !$isOv; # if OV
-                    my ($str1,$str2) = ("$i>$j","$j>$i");
-                    $tot_iniSol--;
                     if ($iIsj == 1) {
                         $evalue_i = "1e-100" if $evalue_i =~ m/^([\+\-]?)([\d\.]*)(?:e([\-]?00))?$/x;
                         $evalue_j = "1e-100" if $evalue_j =~ m/^([\+\-]?)([\d\.]*)(?:e([\-]?00))?$/x;
                         my $iHaveBetterEvalue =  &CompareHighPrecisionFloats($evalue_i,$evalue_j) == -1  ? 1 : 0;
                         # Keep result with better evalue
                         splice(@$ali_block_i, $i_ali, 1) if $iHaveBetterEvalue == 0; # splice i
+                        $OV_cnt->{$i}->{$j}++ if $iHaveBetterEvalue == 0;
                         $delete_i = 1 if $iHaveBetterEvalue == 0;
                         splice(@$ali_block_j, $j_ali, 1) if $iHaveBetterEvalue == 1; # splice j
+                        $OV_cnt->{$j}->{$i}++ if $iHaveBetterEvalue == 1;
                     }
                     else {
                         # Keep result with better evalue
                         splice(@$ali_block_i, $i_ali, 1) if $iInj; # splice i
+                        $OV_cnt->{$i}->{$j}++ if $iInj;
                         $delete_i = 1 if $iInj;
                         splice(@$ali_block_j, $j_ali, 1) if $jIni; # splice j
+                        $OV_cnt->{$j}->{$i}++ if $jIni;
                     }
                 }
                 @$ali_block_j ? $sub_block_j->set_Alignments([@$ali_block_j])
@@ -1955,7 +1969,7 @@ sub RemoveAlignment {
                               : $sub_block_i->set_Alignments([]) ;
     }
     
-    return ($tot_iniSol);
+    return ($OV_cnt);
 }
 
 sub CompareModBlock {
@@ -2089,8 +2103,90 @@ sub CompareHighPrecisionFloats {
     return ($xman <=> $yman);                    # $x and $y have same EXP, so compare mantissas
 }
 
+sub MakeFus {
+    my ($erpin_block,$HeaderOrder,$FusionTab,$OV_cnt) = @_;
+    
+    my $nb_erpinRes = scalar(@$erpin_block);
+    $FusionTab      = CompleteFusionTab($nb_erpinRes,$FusionTab);
+    
+    my @new_erpin_block = ();
+    foreach my $Fusion (@$FusionTab) {
+        if (scalar(@$Fusion) == 1) {
+            my $index = $Fusion->[0];
+            push(@new_erpin_block,$erpin_block->[$index]);
+            my $br = 0;
+        }
+        else {
+            my $block = ();
+            my $name = pop(@$Fusion);
+            foreach my $index (@$Fusion) {
+                push(@$block,$erpin_block->[$index]);
+            }
+            my $initial_nbsol = &TotIniSol($Fusion,$OV_cnt,$nb_erpinRes);
+            # Make fusion
+            $block = &MakeFusionResult($block,$HeaderOrder,$name,$initial_nbsol);
+            push(@new_erpin_block,@$block);
+        }
+    }
+    $erpin_block = \@new_erpin_block;
+    return $erpin_block;
+}
+
+sub TotIniSol {
+    my ($Fusion,$OV_cnt,$nb_erpinRes) = @_;
+    
+    my $tot_iniSol = 0;
+    foreach my $index1 (@$Fusion) {
+        foreach (my $index2 = 0; $index2 < $nb_erpinRes; $index2++) {
+            if (grep(/^$index2$/,@$Fusion) && ($index1 == $index2)) {
+                my $add = $OV_cnt->{$index1}->{$index2};
+                $tot_iniSol += $add;
+            }
+            else {
+                my $remove = $OV_cnt->{$index1}->{$index2} || 0;
+                $tot_iniSol -=  $remove;
+            }
+        }
+    }
+    return $tot_iniSol;
+}
+
+sub CompleteFusionTab {
+    my ($nb_erpinRes,$FusionTab_str) = @_;
+    
+    # Order Item in each Fusion_str
+    my $TabOfPresentItemInFusionTab = ();
+    my $FusionTab = ();
+    foreach my $Fusion_str (@$FusionTab_str) {
+        my @Fusion = split(/,/,$Fusion_str);
+        my $name = pop(@Fusion);
+        @Fusion = sort {$a <=> $b} @Fusion;
+        push(@$TabOfPresentItemInFusionTab,@Fusion);
+        push(@Fusion,$name);
+        push(@$FusionTab,[@Fusion]);
+    }
+    
+    @$FusionTab = sort { $a->[0] <=> $b->[0]} @$FusionTab;
+
+    # Complete FusionTab
+    my $new_FusionTab = ();
+    for(my $i = 0; $i < $nb_erpinRes; $i++) {
+        my $br = 0;
+        if (! grep(/^$i$/,@$TabOfPresentItemInFusionTab)) {
+            push(@$new_FusionTab,[$i]);
+            my $a = 0;
+        } else {
+            foreach my $Fusion (@$FusionTab) {
+                next if $Fusion->[0] != $i;
+                push(@$new_FusionTab,$Fusion);
+            }
+        }
+    }
+    return $new_FusionTab;
+}
+
 sub MakeFusionResult {
-    my ($block,$HeaderOrder,$initial_nbsol) = @_;
+    my ($block,$HeaderOrder,$name,$initial_nbsol) = @_;
     
     # Take all ali
     my $all_ali = [];
@@ -2135,7 +2231,9 @@ sub MakeFusionResult {
     $block->[0]->set_Alignments($new_alis);
     $block->[0]->set_time($full_time);
     $block->[0]->set_OriFusSol($initial_nbsol);
-    splice(@$block,1); #Splice block no more used.
+    my $len_splice   = scalar(@$block) - 1;
+    splice(@$block,1,$len_splice); #Splice block no more used.
+    return $block;
 }
 
 sub AdjsutAliForLog {
@@ -2436,14 +2534,15 @@ sub CreateRNAPredictions {
     my ($RNA_summary,$ali_summary,$log_summary) = ("","","");
     
     foreach my $res_num (sort keys %$AllResult) {
-        my $erpin_res  = $AllResult->{$res_num}; 
-        my $block_name = $erpin_res->[0];
-        my $block      = $erpin_res->[1];
+        my $erpin_res   = $AllResult->{$res_num}; 
+        my $block_name  = $erpin_res->[0];
+        my $block       = $erpin_res->[1];
+        my $HaveHeadStr = 0;
         for(my $i = 0; $i < scalar(@$block); $i++) {
             my $sub_block     = $block->[$i];
             my $Alignments    = $sub_block->get_Alignments();
             my $nb_ali        = scalar(@$Alignments);
-            next if $nb_ali == 0;
+            next if $nb_ali   == 0;
             my $numItem       = $sub_block->get_NumItem();
             my $label         = $sub_block->get_Label();
             my $bracket       = $sub_block->get_bracket();
@@ -2460,7 +2559,7 @@ sub CreateRNAPredictions {
             my $RNAPredictionList = PirObject::RNAPredictionList->new();
             
             my ($aliString1,$rnaString,$aliString2,$logString,$csmString)
-                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i,$takeAliCoord);
+                = CreateHeadString($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$HaveHeadStr,$takeAliCoord);
             
             my $predictlist = [];
             my $aliString3  = ""; #just to advance
@@ -2478,6 +2577,7 @@ sub CreateRNAPredictions {
             $RNAPredictionList->set_Label($label) if $label;
             $RNAPredictionList->set_rnapredictions($predictlist);
             push(@$AllRNAPred, $RNAPredictionList);
+            $HaveHeadStr = 1;
         }
     }
     
@@ -2571,37 +2671,38 @@ sub CreateSummary {
 }
 
 sub CreateHeadString {
-    my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$i,$takeAliCoord) = @_;
+    my ($block_name,$numItem,$nb_ali,$label,$comment,$structure,$consensus,$bracket,$HaveHeadStr,$takeAliCoord) = @_;
     
     my ($headString,$rnaString) = ("","");
     my $name = $block_name;
        $name =~ s/_/ /g;
        $name =~ s/tRNA/tRNA\(s\)/g;
-    if (defined($MAIL_ADR)) {
-        if ($i == 0) {
+#    if (defined($MAIL_ADR)) { // toujours vrai
+        if ($HaveHeadStr == 0) {
+            my $StrToAdd = $name =~ m/tRNA/i ? " (without discriminator position)" : "";
             $headString .=  "*************************************************\n";
-            $headString .=  "Alignment for $name\n";
+            $headString .=  "Alignment for ${name}$StrToAdd\n";
             $headString .=  "*************************************************\n\n";
             $headString .=  "$nb_ali match(es) for $comment\n\n";
         }
         else {
             $headString .=  "$nb_ali match(es) for $comment\n\n";
         }
-    }
-    else {
-        $headString .=  "*************************************************\n";
-        $headString .=  "Alignment for $name item $numItem\n";
-        $headString .=  "*************************************************\n\n";
-        $headString .=  "There are $nb_ali match(es) for $comment\n";
-        $headString .=  "Processing label: $label\n" if defined $label;
-        $headString .=  "\n";
-    
-    }
+#    }
+
+    # else {
+        # $headString .=  "*************************************************\n";
+        # $headString .=  "Alignment for $name item $numItem\n";
+        # $headString .=  "*************************************************\n\n";
+        # $headString .=  "There are $nb_ali match(es) for $comment\n";
+        # $headString .=  "Processing label: $label\n" if defined $label;
+        # $headString .=  "\n";
+    # 
+    # }
     
     my $aliString1 = $headString;
     
     my $aliString2 = ">structure\n$structure";
-    # $aliString2 .= ">consensus\n$consensus\n";
     
     my $logString = $headString;
     $logString =~ s/Alignment/Condensed alignment/;
@@ -2611,7 +2712,7 @@ sub CreateHeadString {
     $logString .=  $bracket . "\n";
     
     if ($block_name =~ m/tRNA/i) {
-        if ($block_name =~ m/^tRNA$/) {
+        if ($comment =~ m/without introns/i) {
             $rnaString .= "List of identified $comment (positions including discriminator) :\n\n";
             $rnaString .=  "                                               tRNA   tRNA tRNA  Anti  \n";
             $rnaString .=  "Species name                   tRNA # Strand  Begin    End Type Codon  E-value\n";

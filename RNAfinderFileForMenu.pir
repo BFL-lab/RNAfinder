@@ -19,9 +19,12 @@
 #       pos_ac = "13"
 # Between "Item" and "EndItem" if the anticodon is the 13 element of the model.
 #
-# $Id: RNAfinderFileForMenu.pir,v 1.6 2011/01/25 21:15:51 nbeck Exp $
+# $Id: RNAfinderFileForMenu.pir,v 1.7 2011/02/02 21:34:45 nbeck Exp $
 #
 # $Log: RNAfinderFileForMenu.pir,v $
+# Revision 1.7  2011/02/02 21:34:45  nbeck
+# Changed way to make models fusion, removed inclusion.
+#
 # Revision 1.6  2011/01/25 21:15:51  nbeck
 # Removed inclusion, added comments for MFannot, changed output format.
 #
@@ -54,7 +57,7 @@ List           	        array	        <MenuList>      Menu list
 - EndFieldsTable
 - Methods
 
-our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.6 2011/01/25 21:15:51 nbeck Exp $';
+our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.7 2011/02/02 21:34:45 nbeck Exp $';
 our ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 
 # Sample format of text file
@@ -129,8 +132,9 @@ sub ImportFromTextFile {
                 $count_line++;
         }
         die "Error: unparsable line '$count_line' in '$filename' (expected \"ToFus=\"), got:\n$line"
-            if ($file[0] !~ m/^\s*ToFus?\s*=\s*(\w+)\s*$/i);
+            if ($file[0] !~ m/^\s*ToFus?\s*=\s*(.+)\s*$/i);
         my $ToFus = $1;
+        my $arrayToFus  = &CheckToFusList($ToFus);
         shift(@file);
         $count_line++;
         
@@ -139,7 +143,7 @@ sub ImportFromTextFile {
             OriName => $name,
             Comment => $ModelComment,
             Order   => $Order,
-            ToFus   => $ToFus,
+            ToFus   => $arrayToFus,
         );
         
         my $ItemSet = $List->get_Set();
@@ -198,3 +202,40 @@ sub ImportFromTextFile {
     $self->set_List($MenuList);
     $self;
 }
+
+
+sub CheckToFusList {
+    my $toFus_str = shift;
+    
+    my $cnt_name_and_item = {};
+    $toFus_str =~ s/\s+//g;
+    my $arrayToFus = ();
+    
+    if ($toFus_str eq "0") {
+        push(@$arrayToFus,$toFus_str);
+    }
+    else {
+        my @split_toFus_str = split(/;/,$toFus_str);
+        foreach my $fusion (@split_toFus_str) {
+            my @split_fus = split(/,/,$fusion);
+            my $name = pop(@split_fus);
+            die "Wrong format of last element for fusion : '$fusion'.\nExpect a string without space.\n"
+                if $name !~ m/^\w+$/;
+            $cnt_name_and_item->{$name}++;
+            foreach my $Item (@split_fus) {
+                die "Wrong format of element $Item for fusion : '$fusion'.\nExpect a number\n"
+                    if $Item !~ m/\d+/;
+                $cnt_name_and_item->{$Item}++;
+            }
+        push(@$arrayToFus,$fusion);
+        }
+    }
+    
+    foreach my $cnt (keys %$cnt_name_and_item) {
+        my $value = $cnt_name_and_item->{$cnt};
+        next if $value ==1;
+        die "ToFus string '$toFus_str' have wrong format in RNAfinder.cfg\n";
+    }
+    return $arrayToFus;
+}
+
