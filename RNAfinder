@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.37 2011/02/02 21:34:44 nbeck Exp $
+#    $Id: RNAfinder,v 1.38 2011/02/08 15:55:08 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.38  2011/02/08 15:55:08  nbeck
+#    Fixed genetic usage for tRNA.
+#
 #    Revision 1.37  2011/02/02 21:34:44  nbeck
 #    Changed way to make models fusion, removed inclusion.
 #
@@ -170,7 +173,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.37 2011/02/02 21:34:44 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.38 2011/02/08 15:55:08 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -233,7 +236,7 @@ This program ($BASENAME):
 
 Usage:
 -------------------
-$BASENAME [-D] [-c genetic code] -d datafile -m model
+$BASENAME [-D] [-g genetic code] -d datafile -m model
                [-A alignedOut] [-L logOut] [-X xmlOut] [-C CustomOut] [-F FastaOut]
                [-pc pourcent] [-P nb_proc] [-l]
 
@@ -980,7 +983,8 @@ sub RunErpinForAllItems {
 sub CreateErpinResultForAllItems {
     my ($ItemSet) = @_;
     
-    my $erpin_res  = [];
+    my $erpin_res    = [];
+    my $HeaderToCode = {};
     foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
         my $Item          = $ItemSet->{$Item_num};
         my $model_file    = $Item->get_ModelFile();
@@ -1014,7 +1018,7 @@ sub CreateErpinResultForAllItems {
         
         # Add anticodon information
         my $Ac_id         = $Item->get_AcId();
-        &AddAcInfo($erpinAli,$Ac_id,$erpinResult,$GENETICCODE) if $Ac_id;
+        &AddAcInfo($erpinAli,$Ac_id,$erpinResult,$GENETICCODE,$HeaderToCode) if $Ac_id;
         push(@$erpin_res,$erpinResult);
     }
     return $erpin_res;
@@ -1757,13 +1761,7 @@ sub noErpinResultError {
 #########################
 
 sub AddAcInfo {
-    my ($AliFile,$ac_ID,$erpinResult,$GENETICCODE) = @_;
-    
-    my $CODON_HASH = {};
-    if ($GENETICCODE) {
-        $CODON_HASH->{$GENETICCODE} = Bio::Tools::CodonTable->new( -id => $GENETICCODE )
-            or die "Cannot find codon table for genetic code id '$GENETICCODE' ?!?\n";
-    }
+    my ($AliFile,$ac_ID,$erpinResult,$GENETICCODE,$HeaderToCode) = @_;
     
     my $linstruct  = PirObject::LinStruct->new();
     my $align_fh   = new IO::File "<$AliFile"
@@ -1778,19 +1776,45 @@ sub AddAcInfo {
     my $rac_offset  = $length_ali-$ac_offset-$ac_elem->get_elemLength();  # reverse offset
     
     my $elem_len =  $ac_elem->get_elemLength();
-    
     my $Alignments   = $erpinResult->get_Alignments();
+    my $CODON_HASH = {};
     foreach my $Alignment (@$Alignments) {
         my $header      = $Alignment->get_header();
         my $fullheader  = $SubToFullId->{$header};
-        my $GeneticCode = $fullheader =~ m/\/trans\s*=\s*(\d+)/ ? $1 : $GENETICCODE;
+        my $GeneticCode = $HeaderToCode->{$fullheader} || "";
         
-        while () {
-            last if $GeneticCode;
-            print "No genetic code has been specified for sequence '$header', which genetic code do you want to use ? 
-            (ncbi genetic code accepted, example 1 for standard genetic code)\n";
-            $GeneticCode = <STDIN>;
-            last if $GeneticCode =~ m/^\d+$/;
+        # If MAIL_ADR is def always use GENETICCODE defined on website
+        if ($MAIL_ADR ne "") {
+                $GeneticCode = $GENETICCODE;
+                $HeaderToCode->{$fullheader} = $GENETICCODE;
+        }
+        else {
+            if ($GeneticCode eq "") { 
+               $GeneticCode = $fullheader =~ m/\/trans\s*=\s*(\d+)/ ? $1 : $GENETICCODE;
+               $HeaderToCode->{$fullheader} = $GeneticCode;
+            }
+            # Conflict between code defined by trans et code defined by -g option
+            if  ($GeneticCode ne "" && $GENETICCODE ne "") {
+                while ($GENETICCODE != $GeneticCode) {
+                    print "Detected conflict between option -g and tag /trans= for '$header', which genetic code do you want to use ? 
+                    (ncbi genetic code accepted, example 1 for standard genetic code)\n";
+                    $GeneticCode = <STDIN>;
+                    if ($GeneticCode =~ m/\d+/){
+                        $HeaderToCode->{$fullheader} = $GeneticCode;
+                        last;
+                    }
+                }
+            }
+            # No genetic code define either by /trans= and by -g
+            while () {
+                if ($GeneticCode =~ m/\d+/) {
+                    $HeaderToCode->{$fullheader} = $GeneticCode;
+                    last;
+                }
+                print "No genetic code has been specified for sequence '$header', which genetic code do you want to use ? 
+                (ncbi genetic code accepted, example 1 for standard genetic code)\n";
+                $GeneticCode = <STDIN>;
+            }
         }
         
         if (!$CODON_HASH->{$GeneticCode}) {
