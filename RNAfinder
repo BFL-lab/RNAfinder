@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.38 2011/02/08 15:55:08 nbeck Exp $
+#    $Id: RNAfinder,v 1.39 2011/03/14 18:19:07 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.39  2011/03/14 18:19:07  nbeck
+#    Fixed bug when header is > 30 char.
+#
 #    Revision 1.38  2011/02/08 15:55:08  nbeck
 #    Fixed genetic usage for tRNA.
 #
@@ -173,7 +176,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.38 2011/02/08 15:55:08 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.39 2011/03/14 18:19:07 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -2781,8 +2784,13 @@ sub AddInfoForeachAli {
         my $HeadForLog       = $ali->get_HeadForLog();
         my $AliForLog        = $ali->get_AliForLog();
         
-        # Adjust Number and reverse start and stop if RC
-        my @HeadElem = split(/\s+/, $HeadForLog);
+        # Adjust Number and reverse start and stop if RC        
+        my $name = substr($HeadForLog,0,30);
+        my $HeadForLog_wo_name = substr($HeadForLog,31);
+           $HeadForLog_wo_name =~ s/^\s+//;
+        my @HeadElem = split(/\s+/, $HeadForLog_wo_name);
+        unshift(@HeadElem, ($name, "|"));
+        
         my @PosElem  = split(/\.\./, $HeadElem[4]);
         my $count    = $HeadElem[6];
         $HeadForLog  = sprintf ("%-30s| %10s %9s %9s..%-9s %s %3s ",
