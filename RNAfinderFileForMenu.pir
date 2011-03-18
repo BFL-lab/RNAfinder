@@ -19,9 +19,12 @@
 #       pos_ac = "13"
 # Between "Item" and "EndItem" if the anticodon is the 13 element of the model.
 #
-# $Id: RNAfinderFileForMenu.pir,v 1.7 2011/02/02 21:34:45 nbeck Exp $
+# $Id: RNAfinderFileForMenu.pir,v 1.8 2011/03/18 19:21:38 nbeck Exp $
 #
 # $Log: RNAfinderFileForMenu.pir,v $
+# Revision 1.8  2011/03/18 19:21:38  nbeck
+# Added option in order to annot gene in comment for AnnotPair.
+#
 # Revision 1.7  2011/02/02 21:34:45  nbeck
 # Changed way to make models fusion, removed inclusion.
 #
@@ -57,7 +60,7 @@ List           	        array	        <MenuList>      Menu list
 - EndFieldsTable
 - Methods
 
-our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.7 2011/02/02 21:34:45 nbeck Exp $';
+our $RCS_VERSION='$Id: RNAfinderFileForMenu.pir,v 1.8 2011/03/18 19:21:38 nbeck Exp $';
 our ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 
 # Sample format of text file
@@ -161,7 +164,7 @@ sub ImportFromTextFile {
             $count_line++;
             
             $Item_counter++;
-            my $autorized_fields = ["erpin_arg","model_file","label","pos_ac","comment","module","cutoff","gap_to_end","comment_for_MFa"];
+            my $autorized_fields = ["erpin_arg","model_file","label","pos_ac","comment","module","cutoff","gap_to_end","comment_for_MFa","to_comment"];
             my $Item = new PirObject::Item();
             while (@file && $file[0] !~ m/^\s*EndItem\s*$/i) {
                 my $line_b = shift(@file);
@@ -176,15 +179,16 @@ sub ImportFromTextFile {
                 
                 die "Field : '$field' line '$count_line' isn't autorized, line '$count_line'.\n" 
                     if !(grep(/^$field/, @$autorized_fields));
-                $Item->set_cutoff($value)    if $field eq "cutoff";
-                $Item->set_erpinArg($value)  if $field eq "erpin_arg";
-                $Item->set_modelFile($value) if $field eq "model_file";
-                $Item->set_Label($value)     if $field eq "label";
-                $Item->set_AcId($value)      if $field eq "pos_ac";
-                $Item->set_module($value)    if $field eq "module";
-                $Item->set_comment($value)   if $field eq "comment";
-                $Item->set_gaptoend($value)  if $field eq "gap_to_end";
+                $Item->set_cutoff($value)         if $field eq "cutoff";
+                $Item->set_erpinArg($value)       if $field eq "erpin_arg";
+                $Item->set_modelFile($value)      if $field eq "model_file";
+                $Item->set_Label($value)          if $field eq "label";
+                $Item->set_AcId($value)           if $field eq "pos_ac";
+                $Item->set_module($value)         if $field eq "module";
+                $Item->set_comment($value)        if $field eq "comment";
+                $Item->set_gaptoend($value)       if $field eq "gap_to_end";
                 $Item->set_commentForMFa($value)  if $field eq "comment_for_MFa";
+                $Item->set_toComment($value)      if $field eq "to_comment";
             }
             unshift(@file,"(EOF)\n") unless @file; # for error message
             my $endcomkeyword = shift(@file);

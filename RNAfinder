@@ -29,9 +29,12 @@
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   #
 #############################################################################
 #
-#    $Id: RNAfinder,v 1.39 2011/03/14 18:19:07 nbeck Exp $
+#    $Id: RNAfinder,v 1.40 2011/03/18 19:21:38 nbeck Exp $
 #
 #    $Log: RNAfinder,v $
+#    Revision 1.40  2011/03/18 19:21:38  nbeck
+#    Added option in order to annot gene in comment for AnnotPair.
+#
 #    Revision 1.39  2011/03/14 18:19:07  nbeck
 #    Fixed bug when header is > 30 char.
 #
@@ -176,7 +179,7 @@ use Sys::Hostname;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: RNAfinder,v 1.39 2011/03/14 18:19:07 nbeck Exp $';
+$RCS_VERSION='$Id: RNAfinder,v 1.40 2011/03/18 19:21:38 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -324,6 +327,7 @@ sub CreateMenuList {
             my $label     = $Item->get_Label()      || "";
             my $comment   = $Item->get_comment()    || "";
             my $cutoff    = $Item->get_cutoff()     || "";
+            my $toComment = $Item->get_toComment    || "";
             
             if ($lvl == 2 ) {
                 $Menu .= "\tItem$Item_num\n";
@@ -332,7 +336,8 @@ sub CreateMenuList {
                 $Menu .= "\t\tCutoff             : $cutoff\n"    if $cutoff;
                 $Menu .= "\t\tAnticodon position : $posAc\n"     if $posAc;
                 $Menu .= "\t\tLabel              : $label\n"     if $label;
-                $Menu .= "\t\tComment            : $comment\n"   if $comment && $comment ne '""';
+                $Menu .= "\t\tComment            : $comment\n"   if $comment   && $comment ne '""';
+                $Menu .= "\t\ttoComment          : $toComment\n" if $toComment;
             }
             else {
                 $Menu .= "\tItem$Item_num : $comment\n";
@@ -1000,6 +1005,7 @@ sub CreateErpinResultForAllItems {
         my $comment       = $Item->get_comment();
         my $gaptoend      = $Item->get_gaptoend();
         my $commentForMFa = $Item->get_commentForMFa();
+        my $toComment     = $Item->get_toComment() || 0;
         my $erpinSuff     = $erpinOut;
            $erpinSuff     =~ s/.out$//;
         my $erpinLog      = "$erpinSuff.log";
@@ -1018,6 +1024,7 @@ sub CreateErpinResultForAllItems {
         $erpinResult->set_gaptoend($gaptoend);
         $erpinResult->set_comment($comment);
         $erpinResult->set_commentForMFa($commentForMFa);
+        $erpinResult->set_toComment($toComment);
         
         # Add anticodon information
         my $Ac_id         = $Item->get_AcId();
@@ -2577,6 +2584,7 @@ sub CreateRNAPredictions {
             my $consensus     = $sub_block->get_consensus();
             my $comment       = $sub_block->get_comment();
             my $commentForMFa = $sub_block->get_commentForMFa() || "";
+            my $toComment       = $sub_block->get_toComment();
             
             my $takeAliCoord  = 0; 
             $takeAliCoord  = 1 if $comment =~ m/rns/ && $comment =~ m/complete/;
@@ -2603,6 +2611,7 @@ sub CreateRNAPredictions {
             $RNAPredictionList->set_NumItem($numItem);
             $RNAPredictionList->set_Label($label) if $label;
             $RNAPredictionList->set_rnapredictions($predictlist);
+            $RNAPredictionList->set_toComment($toComment);
             push(@$AllRNAPred, $RNAPredictionList);
             $HaveHeadStr = 1;
         }
@@ -2938,12 +2947,13 @@ sub CreateAPCFile {
     my $count = 0; 
     
     foreach my $predList (@$AllRNAPred) {
-        my $name   = $predList->get_Name();
-        my $label  = $predList->get_Label();
+        my $name      = $predList->get_Name();
+        my $label     = $predList->get_Label();
+        my $toComment = $predList->get_toComment();
         my $rnapredictions = $predList->get_rnapredictions();
         
         foreach my $prediction (@$rnapredictions){
-            my ($annot,$annot_ac) = &CreateAnnotPair($prediction,$name,$label);
+            my ($annot,$annot_ac) = &CreateAnnotPair($prediction,$name,$label,$toComment);
             my $contig            = $prediction->get_contigname();
 
             
@@ -2987,7 +2997,7 @@ sub CreateAPCFile {
 }
 
 sub CreateAnnotPair {
-    my ($prediction,$name,$label) = @_;
+    my ($prediction,$name,$label,$toComment) = @_;
     
     my $aacode          = $prediction->get_aacode();
     my $anticodon_seq   = $prediction->get_anticodon_seq() ;
@@ -2999,6 +3009,7 @@ sub CreateAnnotPair {
     my $stop            = $prediction->get_stop();
     my $strand          = $prediction->get_strand();
     my $commentForMFa   = $prediction->get_commentForMFa() || "";
+       $toComment       = 0 if !$toComment;
     
     my $arrow = $strand eq "+" ? "==>" : "<=="  ;
        ($start,$stop)        = ($stop,$start) if $strand eq "-";
@@ -3021,8 +3032,15 @@ sub CreateAnnotPair {
         $endline    = ";     G-$name $arrow end";
     }
     
+    my $type = "G";
+    if ($toComment == 1) {
+        $startline     = ";$startline";
+        $endline       = ";$endline";
+        $type          = "C";
+    }
+    
     my $annot      = new PirObject::AnnotPair (
-                         type      => "G", 
+                         type      => $type, 
                          genename  => $name, 
                          startpos  => $start,
                          endpos    => $stop,
