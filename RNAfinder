@@ -3106,7 +3106,7 @@ sub sendMail {
 	my $mailErr   = "$TMP_DIR/mailErr";
 	my $mailOut   = "$TMP_DIR/mailOut";
 	
-    my $cmd = "perl /services/WWW/cgi-bin/RNAweasel/bin/sendmail.pl -f \'rnaweasel\@gmail.com\' -t \'$MAIL_ADR\' -s \'$subject\' -a \'$mail_file , $log_file\'";
+    my $cmd = "perl /services/WWW/cgi-bin/RNAweasel/bin/sendmail.pl -f \'rnaweasel\@bch.umontreal.ca\' -t \'$MAIL_ADR\' -s \'$subject\' -a \'$mail_file , $log_file\'";
 	print STDERR $cmd if $DEBUG;
 	my $ret = system("$cmd 2> $mailErr");
 	
