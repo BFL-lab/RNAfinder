@@ -8,6 +8,7 @@ This package is based on activities of the OGMP, and becomes open source as part
 ## Install
 
 In order to run RNAweasel you need:
+
 1. Install [erpin](http://rna.igmors.u-psud.fr/Software/erpin.php) on your system. 
 2. Install the [PirObject](https://github.com/prioux/PirObject) library.
 3. Install all the necessary [PirModels](https://github.com/BFL-lab/PirModels).
