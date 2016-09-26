@@ -5,7 +5,7 @@
 #                                 RNAfinder                                 #
 #                                                                           #
 # DESCRIPTION:                                                              #
-# Searches for RNAs in a genome. Wrapper around RNASpinner                  #
+# Searches for RNAs in a genome. Wrapper around Erpin                       #
 #                                                                           #
 #############################################################################
 #
@@ -426,7 +426,6 @@ my $AllErpinResult = &CreateNrModelAndRunErpin();
 my ($short_summary,$screen_summary,$html_summary) = &CreateRNAPredictions($AllErpinResult);
 &ScreenOutput($html_summary,$screen_summary);
 &ListOfEmptySeq($Ret_Rseqs,$Rseqs);
-# &sendMail() if $HTML_REPORT;
 print "Temporary work directory $TMP_DIR NOT cleaned up ...\n" if $DEBUG;
 system("/bin/rm","-rf",$TMP_DIR) if -d $TMP_DIR && !$DEBUG;
 
@@ -2958,27 +2957,6 @@ sub ListOfEmptySeq {
     system("cp","$TMP_DIR/NoSolution","./NoSolution") if !$HTML_REPORT;
     print "\nList of sequences without solution in file: NoSolution\n" if !$HTML_REPORT;
 }
-
-# sub sendMail {
-#     my $filename = basename($DATAFILE);
-
-# 	my $subject   = "RNAweasel Result for $MODELNAME on $filename";
-#     my $mail_file = "./mail_core"; # XXX Need path to mail_core
-#     die "File for mail core doesn't exist" if !(-f "$mail_file");
-#     my $log_file  = "$TMP_DIR/$filename.log.tmp";
-# 	my $mailErr   = "$TMP_DIR/mailErr";
-# 	my $mailOut   = "$TMP_DIR/mailOut";
-
-#     my $cmd = "sendmail -f \'xxx' -t \'$HTML_REPORT\' -s \'$subject\' -a \'$mail_file , $log_file\'";
-# 	print STDERR $cmd if $DEBUG;
-# 	my $ret = system("$cmd 2> $mailErr");
-
-# 	if (($ret >> 8) > 1) {
-# 		print STDERR "There was an error sending mail.\n";
-# 		print STDERR "Content of STDERR output:\n";
-# 		system("cat",$mailErr);
-# 	}
-# }
 
 sub CopyResults {
     # Copy results to user's selected output files
