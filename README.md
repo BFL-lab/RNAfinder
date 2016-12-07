@@ -16,7 +16,7 @@ In order to run RNAfinder you need:
 5. Copy the `DOT_RNAfinder.cfg` in your home directory under `.RNAfinder.cfg` or under the directory defined by the `RNAFINDER_CFG_PATH` environment variable.
 6. Copy `RNAfinder` file in one of your executable directory (e.g: a directory list in $PATH).
 
-**Note**: At this point the installation of `RNAfinder` was only tested on Unix system (Ubuntu and CentOS).
+**Note**: At this point the installation of `RNAfinder` was only tested on Unix systems (Ubuntu and CentOS).
 
 ## Usage
 
