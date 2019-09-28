@@ -2885,7 +2885,7 @@ sub CreateAnnotPair {
         $endline    = ";     G-trn${aacode}\($ac\) $arrow end";
     }
     elsif ($name =~ m/intron/i) {
-        $startline  = ";; mfannot:     /group=$label";
+        $startline  = ";; mfannot:     /group=$label ($evalue)";
         $endline    = ";; mfannot:";
         $name       = "comment";
     }
