@@ -53,6 +53,25 @@ In order to run RNAfinder you need:
 
 In order to get the help page of RNAfinder you need to type `RNAfinder -h` in your terminal.
 
+### Models
+
+- rns
+- tRNA
+- rnpB
+- rrn5
+- IntronI
+- IntronII
+
+### Example
+
+Run RNAfinder on a fungla mitocondrial genome to identify rns gene and capture the XML result in a file.
+
+```
+file=fungal_mt.fas
+geneticcode=4
+RNAfinder -m rns -g $geneticcode -d $file  -X - >result.xml
+```
+
 ## Contributing
 
 Please see [CONTRIBUTING](CONTRIBUTING.md) and [CONDUCT](CONDUCT.md) for details.
