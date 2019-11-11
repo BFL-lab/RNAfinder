@@ -10,42 +10,63 @@ becomes open source as part of [MFannot](http://megasun.bch.umontreal.ca/RNAweas
 In order to run RNAfinder you need:
 
 1. Install [erpin](http://rna.igmors.u-psud.fr/Software/erpin.php) on your system.  
-        wget http://rssf.i2bc.paris-saclay.fr/download/Erpin/erpin5.5.4.serv.tar.gz    
-        tar -xvzf erpin5.5.4.serv.tar.gz    
-        cd erpin5.5.4.serv
-	make
-	# Add erpin (`bin/erpin`) to $PATH
-	cp bin/erpin ~/bin/.
+
+```
+wget http://rssf.i2bc.paris-saclay.fr/download/Erpin/erpin5.5.4.serv.tar.gz    
+tar -xvzf erpin5.5.4.serv.tar.gz    
+cd erpin5.5.4.serv
+make
+# Add erpin (`bin/erpin`) to $PATH
+cp bin/erpin ~/bin/.
+```
 	
 2. Install the [PirObject](https://github.com/prioux/PirObject) library.
-        git clone https://github.com/prioux/PirObject
-	# Add `PirObject.pm` to @INC (Perl package path)
-	sudo cp PirObject/lib/PirObject.pm /usr/share/perl5/.
+
+```
+git clone https://github.com/prioux/PirObject
+# Add `PirObject.pm` to @INC (Perl package path)
+sudo cp PirObject/lib/PirObject.pm /usr/share/perl5/.
+```
 
 3. Install all the necessary [PirModels](https://github.com/BFL-lab/PirModels).
-        sudo git clone https://github.com/BFL-lab/PirModels ~/PirModels
+
+```
+sudo git clone https://github.com/BFL-lab/PirModels ~/PirModels
+```
 
 4. Install the BioPerl library [Bio::Tools::CodonTable](http://search.cpan.org/dist/BioPerl/Bio/Tools/CodonTable.pm)
-        sudo cpanm Bio::Tools::CodonTable
+
+```
+sudo cpanm Bio::Tools::CodonTable
+```
 
 5. Copy the `DOT_RNAfinder.cfg` in your home directory under `.RNAfinder.cfg` or under the directory defined by the `RNAFINDER_CFG_PATH` environment variable.
-        cp DOT_RNAfinder.cfg .RNAfinder.cfg
-	echo "export RNAFINDER_CFG_PATH=`pwd`" >> ~/.bashrc
-	source ~/.bashrc
+
+```
+cp DOT_RNAfinder.cfg .RNAfinder.cfg
+echo "export RNAFINDER_CFG_PATH=`pwd`" >> ~/.bashrc
+source ~/.bashrc
+```
 
 6. Copy `RNAfinder` file in one of your executable directory (e.g: a directory list in $PATH).
-	cp RNAfinder ~/bin/.
+
+```
+cp RNAfinder ~/bin/.
+```
 
 7. Add the models needed for the run
-        git clone https://github.com/BFL-lab/MFannot_data
-	echo "# MFannot data installation" >>mfannot-data
-	echo "export EGC=`pwd`/MFannot_data/EGC" >>mfannot-data
-	echo "export MFANNOT_EXT_CFG_PATH=`pwd`/MFannot_data/config" >>mfannot-data
-	echo "export MFANNOT_MOD_PATH=`pwd`/MFannot_data/models" >>mfannot-data
-	echo "export ERPIN_MOD_PATH=`pwd`/MFannot_data/models/Erpin_models" >>mfannot-data
-	echo "export MFANNOT_LIB_PATH=`pwd`/MFannot_data/protein_collections" >>mfannot-data
-	cat mfannot-data >>~/.bashrc
-	source ~/.bashrc
+
+```
+git clone https://github.com/BFL-lab/MFannot_data
+echo "# MFannot data installation" >>mfannot-data
+echo "export EGC=`pwd`/MFannot_data/EGC" >>mfannot-data
+echo "export MFANNOT_EXT_CFG_PATH=`pwd`/MFannot_data/config" >>mfannot-data
+echo "export MFANNOT_MOD_PATH=`pwd`/MFannot_data/models" >>mfannot-data
+echo "export ERPIN_MOD_PATH=`pwd`/MFannot_data/models/Erpin_models" >>mfannot-data
+echo "export MFANNOT_LIB_PATH=`pwd`/MFannot_data/protein_collections" >>mfannot-data
+cat mfannot-data >>~/.bashrc
+source ~/.bashrc
+```
 
 **Note**: At this point the installation of `RNAfinder` was only tested on Unix systems (Ubuntu and CentOS).
 
