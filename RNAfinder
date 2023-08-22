@@ -58,8 +58,7 @@ my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 # File with Menu
 # Define Path for .cfg
 my @CFG_PATH      = (".",($ENV{"HOME"} || ".")); # You can add other search directories here
-push(@CFG_PATH,split(/:/,$ENV{"RNAFINDER_CFG_PATH"}))
-    if $ENV{"RNAFINDER_CFG_PATH"};
+unshift @CFG_PATH, split(/:/,$ENV{"RNAFINDER_CFG_PATH"}) if $ENV{"RNAFINDER_CFG_PATH"};
 
 my $DIR_CFG    = "";
 foreach my $dir (@CFG_PATH) {
@@ -2870,6 +2869,7 @@ sub CreateAnnotPair {
     my $start           = $prediction->get_start();
     my $stop            = $prediction->get_stop();
     my $strand          = $prediction->get_strand();
+    my $type            = "G";
     my $commentForMFa   = $prediction->get_commentForMFa() || "";
        $toComment       = 0 if !$toComment;
 
@@ -2888,13 +2888,13 @@ sub CreateAnnotPair {
         $startline  = ";; mfannot:     /group=$label ($evalue)";
         $endline    = ";; mfannot:";
         $name       = "comment";
+        $type       = "I";
     }
     else {
         $startline  = ";     G-$name $arrow start";
         $endline    = ";     G-$name $arrow end";
     }
 
-    my $type = "G";
     if ($toComment == 1) {
         $startline     = ";$startline";
         $endline       = ";$endline";
