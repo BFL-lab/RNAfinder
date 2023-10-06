@@ -2543,10 +2543,13 @@ sub CreateSummary {
             }
             $nbTotRes     += $nbRetSol if $comment =~ m/intron/;
             $nbOriSol = 0 if !$nbOriSol;
-            $screen_summary .= sprintf("\n%-30.30s %15s %15s %15s\n", "$comment","$nbOriSol","$nbRetSol","$time");
-            $short_summary   .= sprintf("\n%-30.30s %15s\n", "$comment","$nbRetSol");
+            $screen_summary .= sprintf("\n%-30.30s %15s %15s %15s", "$comment","$nbOriSol","$nbRetSol","$time");
+            $short_summary  .= sprintf("\n%-30.30s %15s", "$comment","$nbRetSol");
         }
     }
+
+    $screen_summary .= "\n";
+    $short_summary  .= "\n";
 
     my $html_suf  .= "</FONT></PRE>"if $HTML_REPORT;
     $html_summary = $short_summary;
