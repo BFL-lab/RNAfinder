@@ -867,20 +867,22 @@ sub CreateErpinResultForAllItems {
         my $gaptoend      = $Item->get_gaptoend();
         my $commentForMFa = $Item->get_commentForMFa();
         my $toComment     = $Item->get_toComment() || 0;
+        my $evalueCutoff  = $Item->get_evalueCutoff();
+        my $atCutoff      = $Item->get_atCutoff();
         my $erpinSuff     = $erpinOut;
            $erpinSuff     =~ s/.out$//;
         my $erpinLog      = "$erpinSuff.log";
         my $erpinAli      = "$erpinSuff.ali";
 
-        my $erpinResult   = &MakeModel($model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums);
+        my $erpinResult   = &MakeModel($model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums,$evalueCutoff,$atCutoff);
         next if !$erpinResult;
 
         # Add info foreach erpinResult
         my $modTab        = $Item->get_modTab();
+        my $label         = $Item->get_Label();
         $erpinResult->set_modTab($modTab);
         $erpinResult->set_NumItem($Item_num);
         $erpinResult->set_time($time);
-        my $label         = $Item->get_Label();
         $erpinResult->set_Label($label);
         $erpinResult->set_gaptoend($gaptoend);
         $erpinResult->set_comment($comment);
@@ -959,7 +961,8 @@ sub MakeModel {
     my $ECO_UP        = shift;
     my $lowest        = shift;
     my $erpinMaskNums = shift;
-    my $label         = shift;
+    my $evalueCutoff  = shift;
+    my $atCutoff      = shift;
 
     my $ErpinResult   = new PirObject::erpinResult();
     my $Alignments    = [];
@@ -1025,7 +1028,6 @@ sub MakeModel {
     $res_log .= "Condensed alignment for $outputModel\n";
     $res_log .= "*************************************************\n";
     $res_log .= "$numModels match(es)\n";
-    $res_log .= "Label: $label\n" if defined $label;
     $res_log .= "\n";
 
     ## END : HEADER LOG FILE
@@ -1232,6 +1234,15 @@ sub MakeModel {
         }
         $res_ali .= $AliSeq."\n";
 
+        if ($evalueCutoff) {
+            next if &CompareHighPrecisionFloats($evalue, $evalueCutoff) == 1 ;
+        }
+
+        if ($atCutoff) {
+            my $atContent = &GetATcontent($AliSeq);
+            next if $atContent < $atCutoff;
+        }
+
         my $Alignment = new PirObject::erpinAlignement(
                         header     => $key,
                         aliNumber  => $aliNumber,
@@ -1246,7 +1257,7 @@ sub MakeModel {
                         HeadForAli => $HeadForAli,
                         HeadForLog => $HeadForLog,
                         );
-       push(@$Alignments,$Alignment);
+        push(@$Alignments,$Alignment);
     }
 
     open(OUTMODELLOG, ">$modelLogFile") or die "Could not open training set logfile\n";
@@ -1269,6 +1280,23 @@ sub MakeModel {
     $ErpinResult->set_modelFile($modelFile);
 
     return ($ErpinResult);
+}
+
+sub GetATcontent {
+    my $ali = shift;
+
+    my $at_ali = $ali;
+    $at_ali =~ s/[^atAT]//g;
+
+    my $cg_ali = $ali;
+    $cg_ali =~ s/[^cgCG]//g;
+
+    my $total_length = length($at_ali) + length($cg_ali);
+
+    # % of AT
+    my $atContent = (length($at_ali) / $total_length) * 100;
+
+    return $atContent;
 }
 
 sub GetConsensus {
