@@ -2901,7 +2901,7 @@ sub CreateAnnotPair {
         my $ac = lc($anticodon_seq);
            $ac =~ tr/t/u/;
         $name       = "trn$aacode";
-        $startline  = ";     G-trn${aacode}\($ac\) $arrow start";
+        $startline  = ";     G-trn${aacode}\($ac\) $arrow start;; Erpin evalue: $evalue";
         $endline    = ";     G-trn${aacode}\($ac\) $arrow end";
     }
     elsif ($name =~ m/intron/i) {
