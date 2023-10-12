@@ -86,7 +86,7 @@ print "$BASENAME (version $VERSION) by Natacha Beck.\n";
 
 #How to use this script message
 sub Usage {
-	print <<USAGE;
+    print <<USAGE;
 
     This program will search for and identify RNAs. It is a wrapper around a search tool
 called 'erpin' [1], that needs to be installed on your system.
@@ -254,8 +254,8 @@ sub CheckModuleList {
 # Check arguments numbers #
 ###########################
 if (@ARGV == 0) {
-	print "There were no arguments passed on the command line. This program takes arguments\n";
-	&Usage();
+    print "There were no arguments passed on the command line. This program takes arguments\n";
+    &Usage();
 }
 
 ##################################
@@ -694,7 +694,7 @@ sub CreateNrModelForAllItems {
 
     foreach my $Item_num ( sort { $a <=> $b } keys %$ItemSet) {
         my $Item          = $ItemSet->{$Item_num};
-        my $label         = lc($Item->get_Label());
+        my $label         = lc($Item->get_Label() || "");
         next if !grep(/$label/,@$list) && scalar(@$list);
         my $erpinArg      = $Item->get_erpinArg();
         my $modelFile     = $Item->get_modelFile();
@@ -867,20 +867,22 @@ sub CreateErpinResultForAllItems {
         my $gaptoend      = $Item->get_gaptoend();
         my $commentForMFa = $Item->get_commentForMFa();
         my $toComment     = $Item->get_toComment() || 0;
+        my $evalueCutoff  = $Item->get_evalueCutoff();
+        my $atCutoff      = $Item->get_atCutoff();
         my $erpinSuff     = $erpinOut;
            $erpinSuff     =~ s/.out$//;
         my $erpinLog      = "$erpinSuff.log";
         my $erpinAli      = "$erpinSuff.ali";
 
-        my $erpinResult   = &MakeModel($model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums);
+        my $erpinResult   = &MakeModel($model_file,$erpinOut,$erpinLog,$erpinAli,0,100,$lowest,$erpinMaskNums,$evalueCutoff,$atCutoff);
         next if !$erpinResult;
 
         # Add info foreach erpinResult
         my $modTab        = $Item->get_modTab();
+        my $label         = $Item->get_Label();
         $erpinResult->set_modTab($modTab);
         $erpinResult->set_NumItem($Item_num);
         $erpinResult->set_time($time);
-        my $label         = $Item->get_Label();
         $erpinResult->set_Label($label);
         $erpinResult->set_gaptoend($gaptoend);
         $erpinResult->set_comment($comment);
@@ -921,23 +923,23 @@ sub RunErpin {
 
 sub ParseErpinArgs {
 # erpin giD.epn test.seq 2,21 -add 2 3 -add 4 5 6 8 -add 9 -add 11 12 13 14 15 -add 17 18 20 21 -logzero -2 -cutoff 7 13 22 39 52
-	my @command = @_;
-	my @numbers;
-	my $flag = 0;
+    my @command = @_;
+    my @numbers;
+    my $flag = 0;
 
-	foreach my $bit (@command) {
-		chomp($bit);
+    foreach my $bit (@command) {
+        chomp($bit);
 
-		if($bit =~ m/^-.*$/) {
-			if($bit =~ m/^-add$/) { $flag = 1;}
-			else { $flag = 0;}
-			next;
-		}
-		if( ($flag == 1) and ($bit =~ m/^\d+$/) ) {
-			push @numbers, $bit;
-		}
-	}
-	return(sort { $a <=> $b } @numbers);
+        if($bit =~ m/^-.*$/) {
+            if($bit =~ m/^-add$/) { $flag = 1;}
+            else { $flag = 0;}
+            next;
+        }
+        if( ($flag == 1) and ($bit =~ m/^\d+$/) ) {
+            push @numbers, $bit;
+        }
+    }
+    return(sort { $a <=> $b } @numbers);
 }
 
 ###############################
@@ -959,7 +961,8 @@ sub MakeModel {
     my $ECO_UP        = shift;
     my $lowest        = shift;
     my $erpinMaskNums = shift;
-    my $label         = shift;
+    my $evalueCutoff  = shift;
+    my $atCutoff      = shift;
 
     my $ErpinResult   = new PirObject::erpinResult();
     my $Alignments    = [];
@@ -1025,7 +1028,6 @@ sub MakeModel {
     $res_log .= "Condensed alignment for $outputModel\n";
     $res_log .= "*************************************************\n";
     $res_log .= "$numModels match(es)\n";
-    $res_log .= "Label: $label\n" if defined $label;
     $res_log .= "\n";
 
     ## END : HEADER LOG FILE
@@ -1074,7 +1076,7 @@ sub MakeModel {
 #######  In this part, there is a lots of "length($var)".
 #######  I think they can be replaced by temporary variables but sometimes i was thinking that i causes somes crashes.
 #######
-	my ($prev_cg_name,$cnt_foreach_ali) = ("",0);
+    my ($prev_cg_name,$cnt_foreach_ali) = ("",0);
     foreach my $key (@sortedList) {
         # Remember that the $key here contains three values;
         # but we only care about the $arrayKey and the $hashKey.
@@ -1213,24 +1215,33 @@ sub MakeModel {
                     $tailSeq =  "n" x $suffixLen;
                 }
             }
-			else {
-				# We need to print out a pending sequence
-				my $len = $stop;
+            else {
+                # We need to print out a pending sequence
+                my $len = $stop;
 
-				if(($suffixLen + $len) <= length($seq)) {
-					$tailSeq = substr($seq, $stop, $suffixLen);
-				}
-				elsif($stop < length($seq)) {
-					$tailSeq  = substr($seq, $stop, $suffixLen);
-					$tailSeq .= "n" x ($suffixLen - (length($seq) - $stop));
-				}
-				else {
-					$tailSeq =  "n" x $suffixLen;
-				}
-			}
+                if(($suffixLen + $len) <= length($seq)) {
+                    $tailSeq = substr($seq, $stop, $suffixLen);
+                }
+                elsif($stop < length($seq)) {
+                    $tailSeq  = substr($seq, $stop, $suffixLen);
+                    $tailSeq .= "n" x ($suffixLen - (length($seq) - $stop));
+                }
+                else {
+                    $tailSeq =  "n" x $suffixLen;
+                }
+            }
             $AliSeq .= $tailSeq if $tailSeq;
-		}
+        }
         $res_ali .= $AliSeq."\n";
+
+        if ($evalueCutoff) {
+            next if &CompareHighPrecisionFloats($evalue, $evalueCutoff) == 1 ;
+        }
+
+        if ($atCutoff) {
+            my $atContent = &GetATcontent($AliSeq);
+            next if $atContent < $atCutoff;
+        }
 
         my $Alignment = new PirObject::erpinAlignement(
                         header     => $key,
@@ -1246,7 +1257,7 @@ sub MakeModel {
                         HeadForAli => $HeadForAli,
                         HeadForLog => $HeadForLog,
                         );
-       push(@$Alignments,$Alignment);
+        push(@$Alignments,$Alignment);
     }
 
     open(OUTMODELLOG, ">$modelLogFile") or die "Could not open training set logfile\n";
@@ -1271,6 +1282,23 @@ sub MakeModel {
     return ($ErpinResult);
 }
 
+sub GetATcontent {
+    my $ali = shift;
+
+    my $at_ali = $ali;
+    $at_ali =~ s/[^atAT]//g;
+
+    my $cg_ali = $ali;
+    $cg_ali =~ s/[^cgCG]//g;
+
+    my $total_length = length($at_ali) + length($cg_ali);
+
+    # % of AT
+    my $atContent = (length($at_ali) / $total_length) * 100;
+
+    return $atContent;
+}
+
 sub GetConsensus {
     my $modelFile = shift;
 
@@ -1290,187 +1318,187 @@ sub GetConsensus {
 
 # Get sequences from erpin output file
 sub GetSeqFromOutputFile {
-	my $lowerPerCutOff  = shift;
-	my $upperPerCutOff  = shift;
-	my $Rdata           = shift;
+    my $lowerPerCutOff  = shift;
+    my $upperPerCutOff  = shift;
+    my $Rdata           = shift;
 
-	#locals variable
-	my $header = "";
-	my $Rseqs           = {};
-	my @eValueOrder;
-	my @originalOrder;
-	my %dir             = ();
-	my %start           = ();
-	my %end             = ();
-	my %eValue          = ();
-	my %reverseKey      = ();
-	my $arrayCounter    = 0;
-	my $countera        = 0;
-	my $counterb        = 0;
+    #locals variable
+    my $header = "";
+    my $Rseqs           = {};
+    my @eValueOrder;
+    my @originalOrder;
+    my %dir             = ();
+    my %start           = ();
+    my %end             = ();
+    my %eValue          = ();
+    my %reverseKey      = ();
+    my $arrayCounter    = 0;
+    my $countera        = 0;
+    my $counterb        = 0;
 
-	foreach my $line (@$Rdata) 	{
-		chomp($line);
+    foreach my $line (@$Rdata)     {
+        chomp($line);
 
-		if($line =~ m/>(.*)/) {
+        if($line =~ m/>(.*)/) {
             $arrayCounter = 0 if $1 ne (defined($header) ? $header : "");
             $header = $1;
             $header =~ s/\cM//;
             next;
-		}
-		elsif(!defined($header)) { next; }
-		elsif($line =~ m/(FW|RC)\s+(\d+)\s+(-*[\d]+)\.\.([\d]+)\s+([\d\.]+)\s+([\d\.e\-\+]+)$/) {
-			# FW   1     825..948      109.15  1.46e-36
-			$countera++;
-			push @{$dir{$header}},      $1;
-			push @{$start{$header}},    $3;
-			push @{$end{$header}},      $4;
+        }
+        elsif(!defined($header)) { next; }
+        elsif($line =~ m/(FW|RC)\s+(\d+)\s+(-*[\d]+)\.\.([\d]+)\s+([\d\.]+)\s+([\d\.e\-\+]+)$/) {
+            # FW   1     825..948      109.15  1.46e-36
+            $countera++;
+            push @{$dir{$header}},      $1;
+            push @{$start{$header}},    $3;
+            push @{$end{$header}},      $4;
 
-			if( defined( $reverseKey{"$arrayCounter<->$1<->$header"} ) ) {
-				print YELLOW "DEBUG $countera: $arrayCounter<->$1<->$header has already been entered!\n";
-			}
-			else {
-				$reverseKey{"$arrayCounter<->$1<->$header"}  = $6;
-				if($DEBUG) {
-					print YELLOW "DEBUG $countera: $arrayCounter<->$1<->$header- $6\n";
-				}
-			}
+            if( defined( $reverseKey{"$arrayCounter<->$1<->$header"} ) ) {
+                print YELLOW "DEBUG $countera: $arrayCounter<->$1<->$header has already been entered!\n";
+            }
+            else {
+                $reverseKey{"$arrayCounter<->$1<->$header"}  = $6;
+                if($DEBUG) {
+                    print YELLOW "DEBUG $countera: $arrayCounter<->$1<->$header- $6\n";
+                }
+            }
 
-			push @originalOrder, "$arrayCounter<->$1<->$header";
-			push @{$eValue{$header}},   $6;
-			$arrayCounter++;
-			next;
-		}
-		#22
-		elsif(defined($header) and $line =~ /^$/){ $header = undef; next; }
-		else { push @{$Rseqs->{$header}}, $line; }
-	}
+            push @originalOrder, "$arrayCounter<->$1<->$header";
+            push @{$eValue{$header}},   $6;
+            $arrayCounter++;
+            next;
+        }
+        #22
+        elsif(defined($header) and $line =~ /^$/){ $header = undef; next; }
+        else { push @{$Rseqs->{$header}}, $line; }
+    }
 
-	# We must sort the order of the sequences by e-value
-	foreach my $key (sort{$reverseKey{$a} <=> $reverseKey{$b}} keys %reverseKey) {
-		$counterb++;
-		push @eValueOrder, $key;
-	}
+    # We must sort the order of the sequences by e-value
+    foreach my $key (sort{$reverseKey{$a} <=> $reverseKey{$b}} keys %reverseKey) {
+        $counterb++;
+        push @eValueOrder, $key;
+    }
 
-	my $numberResults = @eValueOrder;
-	my $first = int( ( (100 - $upperPerCutOff) / 100 ) * $numberResults);
-	my $last = int( ( (100 - $lowerPerCutOff) / 100 ) * $numberResults);
-	@eValueOrder = @eValueOrder[$first..($last-1)];
+    my $numberResults = @eValueOrder;
+    my $first = int( ( (100 - $upperPerCutOff) / 100 ) * $numberResults);
+    my $last = int( ( (100 - $lowerPerCutOff) / 100 ) * $numberResults);
+    @eValueOrder = @eValueOrder[$first..($last-1)];
 
-	if($DEBUG) {
-		print YELLOW "DEBUG COUNTER IS $countera\n";
-		print YELLOW "DEBUG COUNTER IS $counterb\n";
-		print YELLOW "DEBUG: seqs size          = " . keys(%$Rseqs) . "\n";
-		print YELLOW "DEBUG: reverseKey size    = " . keys(%reverseKey) . "\n";
-		print YELLOW "DEBUG: eValueOrder size   = " . scalar(@eValueOrder) . "\n";
-		print YELLOW "DEBUG: originalOrder size = " . scalar(@originalOrder) . "\n";
-		print YELLOW "DEBUG: dir size           = " . keys(%dir) . "\n";
-		print YELLOW "DEBUG: start size         = " . keys(%start) . "\n";
-		print YELLOW "DEBUG: end size           = " . keys(%end) . "\n";
-		print YELLOW "DEBUG: evalue size        = " . keys(%eValue) . "\n";
-	}
-	return($Rseqs, \@eValueOrder, \@originalOrder, \%dir, \%start, \%end, \%eValue, $first, $last, $numberResults);
+    if($DEBUG) {
+        print YELLOW "DEBUG COUNTER IS $countera\n";
+        print YELLOW "DEBUG COUNTER IS $counterb\n";
+        print YELLOW "DEBUG: seqs size          = " . keys(%$Rseqs) . "\n";
+        print YELLOW "DEBUG: reverseKey size    = " . keys(%reverseKey) . "\n";
+        print YELLOW "DEBUG: eValueOrder size   = " . scalar(@eValueOrder) . "\n";
+        print YELLOW "DEBUG: originalOrder size = " . scalar(@originalOrder) . "\n";
+        print YELLOW "DEBUG: dir size           = " . keys(%dir) . "\n";
+        print YELLOW "DEBUG: start size         = " . keys(%start) . "\n";
+        print YELLOW "DEBUG: end size           = " . keys(%end) . "\n";
+        print YELLOW "DEBUG: evalue size        = " . keys(%eValue) . "\n";
+    }
+    return($Rseqs, \@eValueOrder, \@originalOrder, \%dir, \%start, \%end, \%eValue, $first, $last, $numberResults);
 }
 
 # Get structure lines from a model file
 sub GetStructureFromModelFile {
-	#get the model
-	my $Rmodel = shift;
+    #get the model
+    my $Rmodel = shift;
 
-	#local vars
-	my $header;
-	my $structure;
+    #local vars
+    my $header;
+    my $structure;
 
-	foreach my $line (@$Rmodel) {
-		if($line =~ m/>.*/) {
-			if($line =~ m/>structure/) {
-				$header = $1;
-				next;
-			}
-			else { last; }
-		}
-		else {
-			if(!defined($structure)) {
-				$structure = $line;
-			}
-			else {
-				$structure .= $line;
-			}
-		}
-	}
-	return $structure;
+    foreach my $line (@$Rmodel) {
+        if($line =~ m/>.*/) {
+            if($line =~ m/>structure/) {
+                $header = $1;
+                next;
+            }
+            else { last; }
+        }
+        else {
+            if(!defined($structure)) {
+                $structure = $line;
+            }
+            else {
+                $structure .= $line;
+            }
+        }
+    }
+    return $structure;
 }
 
 sub GetStructurePos {
-	my $structure = shift;
-	my $pos       = shift;
+    my $structure = shift;
+    my $pos       = shift;
 
-	if ($pos > 99) { die "You can't have a mask position that is greater than 99!\n"; }
+    if ($pos > 99) { die "You can't have a mask position that is greater than 99!\n"; }
 
-	my $pos1      = int($pos/10);
-	my $pos2      = int($pos%10);
-	my ($struct1, $struct2) = split /\n/, $structure;
-	my $posA      = index($struct1, $pos1);
-	my $posB      = index($struct2, $pos2, $posA);
+    my $pos1      = int($pos/10);
+    my $pos2      = int($pos%10);
+    my ($struct1, $struct2) = split /\n/, $structure;
+    my $posA      = index($struct1, $pos1);
+    my $posB      = index($struct2, $pos2, $posA);
 
-	return $posB;
+    return $posB;
 }
 
 # Get length of the structure line
 sub GetStructureLength {
-	my $structure = shift;
-	my ($struct1, $struct2) = split /\n/, $structure;
-	return length($struct2);
+    my $structure = shift;
+    my ($struct1, $struct2) = split /\n/, $structure;
+    return length($struct2);
 }
 
 sub makeReportSeq {
-	my $inSeq     = shift;
-	my @maxBitLen = @_;
-	my $outSeq    = "";
-	my @seqBits   = split(/\./, $inSeq);
+    my $inSeq     = shift;
+    my @maxBitLen = @_;
+    my $outSeq    = "";
+    my @seqBits   = split(/\./, $inSeq);
 
-	for(my $i=0; $i<@seqBits;$i++) {
-		if($seqBits[$i] =~ m/^[\-]+$/) {
-			if($maxBitLen[$i] > 16) {
-				$outSeq .= " " x 17;
-			}
-			else {
-				$outSeq .= " " x ($maxBitLen[$i] + 1);
-			}
-		}
-		#If this is lowercase
-		elsif($seqBits[$i] =~ m/[a-z]/) {
-			$seqBits[$i] =~ s/-//g;
-			my $lengthSeqBits = length($seqBits[$i]);
+    for(my $i=0; $i<@seqBits;$i++) {
+        if($seqBits[$i] =~ m/^[\-]+$/) {
+            if($maxBitLen[$i] > 16) {
+                $outSeq .= " " x 17;
+            }
+            else {
+                $outSeq .= " " x ($maxBitLen[$i] + 1);
+            }
+        }
+        #If this is lowercase
+        elsif($seqBits[$i] =~ m/[a-z]/) {
+            $seqBits[$i] =~ s/-//g;
+            my $lengthSeqBits = length($seqBits[$i]);
 
-			if($lengthSeqBits > 16) {
-				$outSeq .= substr($seqBits[$i], 0, 3);
+            if($lengthSeqBits > 16) {
+                $outSeq .= substr($seqBits[$i], 0, 3);
 
-				if($lengthSeqBits/1000 >= 1) {
-					$outSeq .= "..(" . $lengthSeqBits  . ").." .  substr($seqBits[$i], $lengthSeqBits - 3, 3) . " ";
-				}
-				elsif(($lengthSeqBits/100) >= 1) {
-					$outSeq .= "..(" . $lengthSeqBits  . ")..." . substr($seqBits[$i], $lengthSeqBits - 3, 3) . " ";
-				}
-				else {
-					$outSeq .= "...(" . $lengthSeqBits  . ")..." .substr($seqBits[$i], $lengthSeqBits - 3, 3) . " ";
-				}
-			}
-			else {
-				my $filler;
-				if($maxBitLen[$i] > 16) {
-					$filler = 16 - $lengthSeqBits;
-				}
-				else {
-					$filler = $maxBitLen[$i] - $lengthSeqBits;
-				}
-				$outSeq .= $seqBits[$i] . " " . " " x $filler;
-			}
-		}
-		else {
-			$outSeq .= $seqBits[$i] . " ";
-		}
-	}
-	return $outSeq;
+                if($lengthSeqBits/1000 >= 1) {
+                    $outSeq .= "..(" . $lengthSeqBits  . ").." .  substr($seqBits[$i], $lengthSeqBits - 3, 3) . " ";
+                }
+                elsif(($lengthSeqBits/100) >= 1) {
+                    $outSeq .= "..(" . $lengthSeqBits  . ")..." . substr($seqBits[$i], $lengthSeqBits - 3, 3) . " ";
+                }
+                else {
+                    $outSeq .= "...(" . $lengthSeqBits  . ")..." .substr($seqBits[$i], $lengthSeqBits - 3, 3) . " ";
+                }
+            }
+            else {
+                my $filler;
+                if($maxBitLen[$i] > 16) {
+                    $filler = 16 - $lengthSeqBits;
+                }
+                else {
+                    $filler = $maxBitLen[$i] - $lengthSeqBits;
+                }
+                $outSeq .= $seqBits[$i] . " " . " " x $filler;
+            }
+        }
+        else {
+            $outSeq .= $seqBits[$i] . " ";
+        }
+    }
+    return $outSeq;
 }
 
 sub modifyModelSeq {
@@ -1619,12 +1647,12 @@ sub CreateSeq {
 
 # Erpin error when no results
 sub noErpinResultError {
-	print RED "****************************************\n";
-	print RED "*  There was a problem running Erpin   *\n";
-	print RED "*     It did not produce an output     *\n";
-	print RED "* Run Erpin directly for error messages*\n";
-	print RED "****************************************\n";
-	exit(1);
+    print RED "****************************************\n";
+    print RED "*  There was a problem running Erpin   *\n";
+    print RED "*     It did not produce an output     *\n";
+    print RED "* Run Erpin directly for error messages*\n";
+    print RED "****************************************\n";
+    exit(1);
 }
 
 #########################
@@ -2656,12 +2684,12 @@ sub AddInfoForeachAli {
         my @PosElem  = split(/\.\./, $HeadElem[4]);
         my $count    = $HeadElem[6];
         $HeadForLog  = sprintf ("%-30s| %10s %9s %9s..%-9s %s %3s ",
-				$HeadElem[0],
-				$HeadElem[2],
-				$HeadElem[3],
-				$HeadElem[5] eq 'FW' ? $PosElem[0] : $PosElem[1],
-				$HeadElem[5] eq 'FW' ? $PosElem[1] : $PosElem[0],
-				$HeadElem[5],
+                $HeadElem[0],
+                $HeadElem[2],
+                $HeadElem[3],
+                $HeadElem[5] eq 'FW' ? $PosElem[0] : $PosElem[1],
+                $HeadElem[5] eq 'FW' ? $PosElem[1] : $PosElem[0],
+                $HeadElem[5],
                 $count);
 
         # Add blank line in order to separe contig
@@ -2873,7 +2901,7 @@ sub CreateAnnotPair {
         my $ac = lc($anticodon_seq);
            $ac =~ tr/t/u/;
         $name       = "trn$aacode";
-        $startline  = ";     G-trn${aacode}\($ac\) $arrow start";
+        $startline  = ";     G-trn${aacode}\($ac\) $arrow start;; Erpin evalue: $evalue";
         $endline    = ";     G-trn${aacode}\($ac\) $arrow end";
     }
     elsif ($name =~ m/intron/i) {
@@ -3042,7 +3070,7 @@ sub CopyStream { # just read write read write etc
 
 # Check if the file in argument exist
 sub checkFile {
-	my $File = shift(@_); #file name
+    my $File = shift(@_); #file name
     die "File $File does not exist\n"
-	    if (!-e $File );
+        if (!-e $File );
 }
